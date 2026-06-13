@@ -6,8 +6,8 @@ import { scene } from './scene.js';
 
 // lump -> {color, geom factory, size}
 const STYLE = {
-  REGEN:     { color: 0xff8a3c, shape: 'octa',  size: 700 },
-  MOB:       { color: 0xff4d4d, shape: 'cone',  size: 600 },
+  // REGEN (monster spawns) + MOB (NPCs) now render as real composed meshes
+  // (see objects.js / spawnGroup + npcGroup) instead of placeholder markers.
   WARP:      { color: 0xff3cf0, shape: 'torus', size: 600 },
   EVENT:     { color: 0x39d0ff, shape: 'box',   size: 500 },
   AREA:      { color: 0x39ffd0, shape: 'wbox',  size: 500 },

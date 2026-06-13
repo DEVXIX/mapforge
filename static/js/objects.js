@@ -38,6 +38,18 @@ export const objectsGroup = new THREE.Group();
 objectsGroup.name = 'objects';
 scene.add(objectsGroup);
 
+// NPCs (MOB lump) render as real composed meshes in their own group so the
+// "NPCs (MOB)" layer toggle can show/hide them independently of static objects.
+export const npcGroup = new THREE.Group();
+npcGroup.name = 'npcs';
+scene.add(npcGroup);
+
+// REGEN spawn points render the monster variety they spawn, clustered in a ring
+// around the point — controlled by the "Spawns (REGEN)" layer toggle.
+export const spawnGroup = new THREE.Group();
+spawnGroup.name = 'spawns';
+scene.add(spawnGroup);
+
 const ZSC_LUMPS = ['OBJECT', 'CNST'];
 const texLoader = new THREE.TextureLoader();
 const TEX = new Map();
@@ -109,6 +121,78 @@ function collectBatches(zone, packs) {
         }
       }
     }
+    // MOB — NPCs composed from LIST_NPC.CHR -> PART_NPC.ZSC models (head+body…),
+    // walked exactly like a ZSC model. Routed to npcGroup via the isNpc flag.
+    const mob = lumps['MOB'];
+    const npcPack = packs.NPC;
+    if (mob && npcPack && npcPack.models) {
+      for (const rec of mob) {
+        const model = npcPack.models[rec.object_id];
+        if (!model || !model.parts) continue;
+        ifoMatrix(rec, ifoMat);
+        const world = new Array(model.parts.length);
+        for (let i = 0; i < model.parts.length; i++) {
+          const part = model.parts[i];
+          partMatrix(part, localMat);
+          const out = new THREE.Matrix4();
+          if (part.parent < 0 || part.parent >= i || !world[part.parent])
+            out.multiplyMatrices(ifoMat, localMat);
+          else
+            out.multiplyMatrices(world[part.parent], localMat);
+          world[i] = out;
+          if (!part.mesh) continue;
+          const key = `NPC|${part.mesh}|${part.mat || ''}`;
+          let b = byKey.get(key);
+          if (!b) { b = { mesh: part.mesh, mat: part.mat, flags: part.flags || {}, matrices: [], picks: [], isNpc: true }; byKey.set(key, b); }
+          b.matrices.push(out);
+          b.picks.push({ tile: [t.x, t.y], lump: 'MOB', idx: rec.idx });
+        }
+      }
+    }
+
+    // REGEN — monster spawn points. Draw each distinct monster the point spawns
+    // (basic + tactics) once, arranged in a ring around the spawn centre.
+    const regen = lumps['REGEN'];
+    if (regen && npcPack && npcPack.models) {
+      const spawnQ = new THREE.Quaternion(), up = new THREE.Vector3(0, 0, 1);
+      for (const rec of regen) {
+        const e = rec.extra || {};
+        const seen = new Set(), mobs = [];
+        for (const list of [e.basic, e.tactics])
+          for (const m of (list || []))
+            if (m && m.mob_id != null && !seen.has(m.mob_id) && npcPack.models[m.mob_id]) {
+              seen.add(m.mob_id); mobs.push(m.mob_id);
+            }
+        const n = Math.min(mobs.length, 8);
+        const R = Math.max(800, n * 280);
+        for (let k = 0; k < n; k++) {
+          const model = npcPack.models[mobs[k]];
+          const ang = n > 1 ? (k / n) * Math.PI * 2 : 0;
+          const ox = n > 1 ? Math.cos(ang) * R : 0, oy = n > 1 ? Math.sin(ang) * R : 0;
+          spawnQ.setFromAxisAngle(up, ang + Math.PI);      // face the centre
+          ifoMat.compose(new THREE.Vector3(rec.pos[0] + ox, rec.pos[1] + oy, rec.pos[2]),
+                         spawnQ, new THREE.Vector3(1, 1, 1));
+          const world = new Array(model.parts.length);
+          for (let i = 0; i < model.parts.length; i++) {
+            const part = model.parts[i];
+            partMatrix(part, localMat);
+            const out = new THREE.Matrix4();
+            if (part.parent < 0 || part.parent >= i || !world[part.parent])
+              out.multiplyMatrices(ifoMat, localMat);
+            else
+              out.multiplyMatrices(world[part.parent], localMat);
+            world[i] = out;
+            if (!part.mesh) continue;
+            const key = `SPAWN|${part.mesh}|${part.mat || ''}`;
+            let b = byKey.get(key);
+            if (!b) { b = { mesh: part.mesh, mat: part.mat, flags: part.flags || {}, matrices: [], picks: [], isSpawn: true }; byKey.set(key, b); }
+            b.matrices.push(out);
+            b.picks.push({ tile: [t.x, t.y], lump: 'REGEN', idx: rec.idx });
+          }
+        }
+      }
+    }
+
     // MORPH — flat STB lookup, single mesh per record.
     const morph = lumps['MORPH'];
     const rows = packs.MORPH && packs.MORPH.rows;
@@ -154,7 +238,7 @@ export async function buildObjects(zone, packs) {
     inst.instanceMatrix.needsUpdate = true;
     inst.userData = { kind: 'object', picks: b.picks };
     inst.frustumCulled = false;
-    objectsGroup.add(inst);
+    (b.isNpc ? npcGroup : b.isSpawn ? spawnGroup : objectsGroup).add(inst);
     geo.computeBoundingBox();
     box.union(geo.boundingBox);
     // MORPH with a motion clip -> play its vertex animation on this geometry.
@@ -178,11 +262,12 @@ async function buildGeometry(meshPath) {
 
 export function clearObjects() {
   morphAnims.length = 0;
-  for (const m of [...objectsGroup.children]) {
-    objectsGroup.remove(m);
-    m.geometry?.dispose();
-    m.material?.dispose();
-  }
+  for (const g of [objectsGroup, npcGroup, spawnGroup])
+    for (const m of [...g.children]) {
+      g.remove(m);
+      m.geometry?.dispose();
+      m.material?.dispose();
+    }
 }
 
 // Build one material for a part (shared by instanced render + previews).

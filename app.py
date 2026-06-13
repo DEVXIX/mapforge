@@ -24,6 +24,8 @@ if _SCRIPTS not in sys.path:
 
 import config                       # noqa: E402
 import zone as Z                    # noqa: E402
+import rose_ifo as RI               # noqa: E402
+import rose_chr                     # noqa: E402
 from rose_zsc import read_zsc       # noqa: E402
 from rose_zms import read_zms       # noqa: E402
 from parse_stb import StbFile       # noqa: E402
@@ -143,6 +145,84 @@ def _zsc_to_dict(zsc) -> dict:
     return {"models": models, "meshes": zsc.meshes, "materials": [m.path for m in zsc.materials]}
 
 
+# --------------------------------------------------------------------------
+# NPCs (MOB lump): object_id -> LIST_NPC.CHR character -> PART_NPC.ZSC models.
+# Composed into the same {models:{id:{parts}}} shape the object renderer uses,
+# so MOB placements can draw real meshes instead of cone markers.
+# --------------------------------------------------------------------------
+_CHR = None
+_NPC_PACK_CACHE: dict = {}
+
+
+def _get_chr():
+    global _CHR
+    if _CHR is None:
+        p = _resolve("NPC/LIST_NPC.CHR")
+        _CHR = rose_chr.read_chr(p) if p else None
+    return _CHR
+
+
+def _zsc_model_parts(zsc, model_idx: int, base: int) -> list:
+    """Serialize one ZSC model's parts, offsetting parent indices by `base` so
+    several models can be concatenated into one part list (an NPC = head+body…)."""
+    out = []
+    if not (0 <= model_idx < len(zsc.models)):
+        return out
+    for p in zsc.models[model_idx].parts:
+        mesh_rel = zsc.meshes[p.mesh_idx] if 0 <= p.mesh_idx < len(zsc.meshes) else None
+        mat = zsc.materials[p.mat_idx] if 0 <= p.mat_idx < len(zsc.materials) else None
+        flags = None
+        if mat:
+            flags = {"two_side": bool(mat.is_two_side), "alpha": bool(mat.is_alpha),
+                     "alpha_test": bool(mat.alpha_test), "alpha_ref": mat.alpha_ref,
+                     "blend": mat.blend_type}
+        out.append({
+            "mesh": mesh_rel, "mat": mat.path if mat else None, "flags": flags,
+            "pos": list(p.position), "rot": list(p.rotate), "scl": list(p.scale),
+            "parent": (p.parent + base) if p.parent >= 0 else -1,
+        })
+    return out
+
+
+def _npc_pack(z) -> dict:
+    key = z["key"]
+    if key in _NPC_PACK_CACHE:
+        return _NPC_PACK_CACHE[key]
+    chrf = _get_chr()
+    zsc = _get_zsc("NPC/PART_NPC.ZSC")
+    models = {}
+    if chrf and zsc:
+        ids = set()
+        for x, y, stem in Z._tiles_in(z["dir"]):
+            try:
+                ifo = RI.read_ifo(stem + ".IFO")
+            except Exception:
+                continue
+            ml = ifo.lumps.get(RI.LUMP_MOB)          # fixed NPCs
+            if ml:
+                for ob in ml.objects:
+                    ids.add(ob.object_id)
+            rl = ifo.lumps.get(RI.LUMP_REGEN)         # monster spawn points
+            if rl:
+                for ob in rl.objects:
+                    for m in ob.extra.get("basic", []) + ob.extra.get("tactics", []):
+                        ids.add(m.mob_id)
+        for nid in ids:
+            if not (0 <= nid < len(chrf.characters)):
+                continue
+            ch = chrf.characters[nid]
+            if not ch or not ch.objects:
+                continue
+            parts = []
+            for mi in ch.objects:
+                parts.extend(_zsc_model_parts(zsc, mi, len(parts)))
+            if parts:
+                models[str(nid)] = {"parts": parts}
+    out = {"models": models}
+    _NPC_PACK_CACHE[key] = out
+    return out
+
+
 @app.route("/api/zone/<key>/packs")
 def api_zone_packs(key: str):
     z = Z.find_zone(key)
@@ -155,6 +235,11 @@ def api_zone_packs(key: str):
         zsc = _get_zsc(pack_rel)
         out[lump_name] = ({"error": f"not found: {pack_rel}"} if zsc is None
                           else {"pack_path": pack_rel, **_zsc_to_dict(zsc)})
+
+    try:
+        out["NPC"] = _npc_pack(z)
+    except Exception as e:
+        out["NPC"] = {"error": str(e)}
 
     morph_stb = os.path.join(config.STB_DIR, "LIST_MORPH_OBJECT.STB")
     if os.path.exists(morph_stb):

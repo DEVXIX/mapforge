@@ -5,7 +5,7 @@ import { scene, camera, renderer, controls, frameBox } from './scene.js';
 import * as API from './api.js';
 import { buildTerrain, clearTerrain, terrainGroup } from './terrain.js';
 import { buildWater, clearWater, waterGroup } from './water.js';
-import { buildObjects, clearObjects, objectsGroup, setTexturesHidden } from './objects.js';
+import { buildObjects, clearObjects, objectsGroup, npcGroup, spawnGroup, setTexturesHidden } from './objects.js';
 import { buildMarkers, clearMarkers, markerGroups, markerCount } from './markers.js';
 import { buildCollision, clearCollision, setCollisionVisible, isCollisionVisible, paintAt, collisionMeshes } from './collision.js';
 import * as Editor from './editor.js';
@@ -105,8 +105,8 @@ const LAYER_DEFS = [
   { id: 'objects', label: 'Objects (OBJ+CNST+MORPH)', color: 0xb8c0c8, consumer: 'client', get: () => objectsGroup },
   { id: 'water', label: 'Water (OCEAN)', color: 0x2f6f9f, consumer: 'client', get: () => waterGroup },
   { id: 'mov', label: 'Walk grid (MOV)', color: 0xdc3a3a, consumer: 'server', mov: true },
-  { id: 'REGEN', label: 'Spawns (REGEN)', color: 0xff8a3c, consumer: 'server', marker: 'REGEN' },
-  { id: 'MOB', label: 'NPCs (MOB)', color: 0xff4d4d, consumer: 'server', marker: 'MOB' },
+  { id: 'REGEN', label: 'Spawns (REGEN)', color: 0xff8a3c, consumer: 'server', count: 'REGEN', get: () => spawnGroup },
+  { id: 'MOB', label: 'NPCs (MOB)', color: 0xff4d4d, consumer: 'server', count: 'MOB', get: () => npcGroup },
   { id: 'WARP', label: 'Warps', color: 0xff3cf0, consumer: 'both', marker: 'WARP' },
   { id: 'EVENT', label: 'Events', color: 0x39d0ff, consumer: 'server', marker: 'EVENT' },
   { id: 'AREA', label: 'Areas', color: 0x39ffd0, consumer: 'server', marker: 'AREA' },
@@ -135,7 +135,7 @@ function buildLayers(zone) {
     const lbl = document.createElement('span'); lbl.textContent = L.label;
     const tag = document.createElement('span'); tag.className = 'tag ' + L.consumer; tag.textContent = L.consumer;
     const ct = document.createElement('span'); ct.className = 'ct';
-    ct.textContent = L.marker ? (counts[L.marker] || 0) : '';
+    ct.textContent = (L.marker || L.count) ? (counts[L.marker || L.count] || 0) : '';
     row.append(cb, sw, lbl, tag, ct);
     host.appendChild(row);
   }
