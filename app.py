@@ -166,6 +166,7 @@ def api_zone_packs(key: str):
                 rows.append(None if not mesh else {
                     "name": stb.get(r, 0), "mesh": mesh,
                     "mat": stb.get(r, 3) if stb.col_count > 3 else None,
+                    "mot": stb.get(r, 2) if stb.col_count > 2 else None,
                 })
             out["MORPH"] = {"rows": rows}
         except Exception as e:
@@ -259,6 +260,39 @@ def api_catalog():
     _CATALOG = {"models": entries, "morph": morph,
                 "zones": sorted({e["zone"] for e in entries})}
     return jsonify(_CATALOG)
+
+
+@app.route("/api/anim")
+def api_anim():
+    """Per-frame vertex positions for a MORPH object's ZMO, in the same vertex
+    order + scale (×100 for v7) as /api/mesh. Binary:
+        u32 magic 'RANM'  u32 frames  u32 nverts  f32 fps
+        frames × nverts × f32×3 positions
+    Returns 204 if the ZMO is a UV/texture-flow clip (no vertex animation)."""
+    import rose_zmo
+    zmo_rel = request.args.get("zmo", "")
+    mesh_rel = request.args.get("mesh", "")
+    zp = _resolve(zmo_rel)
+    mp = _resolve(mesh_rel)
+    if not zp or not mp:
+        abort(404)
+    zms = read_zms(mp)
+    zmo = rose_zmo.read_zmo(zp)
+    pos_ch = {c.refer_id: c for c in zmo.channels if c.ctype == rose_zmo.CT_POSITION}
+    if not pos_ch:
+        return ("", 204)
+    nv = len(zms.positions)
+    scale = 100.0 if zms.version >= 7 else 1.0
+    F = zmo.num_frames
+    out = bytearray()
+    out += struct.pack("<IIIf", 0x4D4E4152, F, nv, float(zmo.fps))
+    rest = zms.positions
+    for f in range(F):
+        for v in range(nv):
+            ch = pos_ch.get(v)
+            p = ch.frames[f] if ch else rest[v]
+            out += struct.pack("<fff", p[0] * scale, p[1] * scale, p[2] * scale)
+    return Response(bytes(out), mimetype="application/octet-stream")
 
 
 @app.route("/api/mesh")

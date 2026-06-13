@@ -45,3 +45,14 @@ export async function getMesh(path) {
 export function texUrl(path, alpha) {
   return `/api/texture?path=${encodeURIComponent(path)}${alpha ? '&alpha=1' : ''}`;
 }
+
+// MORPH vertex animation: per-frame positions matching the mesh vertex order.
+export async function getAnim(zmoPath, meshPath) {
+  const r = await fetch(`/api/anim?zmo=${encodeURIComponent(zmoPath)}&mesh=${encodeURIComponent(meshPath)}`);
+  if (r.status === 204 || !r.ok) return null;
+  const buf = await r.arrayBuffer();
+  const dv = new DataView(buf);
+  if (dv.getUint32(0, true) !== 0x4D4E4152) return null;
+  const frames = dv.getUint32(4, true), nverts = dv.getUint32(8, true), fps = dv.getFloat32(12, true);
+  return { frames, nverts, fps, positions: new Float32Array(buf, 16, frames * nverts * 3) };
+}

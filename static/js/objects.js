@@ -2,8 +2,37 @@
 // drawn as InstancedMesh batches keyed by (mesh,material). Each instance keeps
 // a pick {tile, lump, idx} so selection maps straight back to the IFO record.
 import * as THREE from 'three';
-import { scene } from './scene.js';
-import { getMesh, texUrl } from './api.js';
+import { scene, onFrame } from './scene.js';
+import { getMesh, texUrl, getAnim } from './api.js';
+
+// MORPH vertex animations (banners waving, water streams). Each animated MORPH
+// mesh shares one geometry across its instances, so updating the geometry's
+// positions animates every placement in sync (as ROSE does).
+const morphAnims = [];     // { geom, anim, start }
+export let morphSpeed = 1.0;
+export function setMorphSpeed(s) { morphSpeed = s; }
+
+function registerMorphAnim(geom, anim) {
+  geom.attributes.position.setUsage(THREE.DynamicDrawUsage);
+  morphAnims.push({ geom, anim, start: performance.now() });
+}
+
+onFrame(() => {
+  if (!morphAnims.length) return;
+  const now = performance.now();
+  for (const m of morphAnims) {
+    const { anim, geom } = m;
+    const t = (now - m.start) / 1000 * anim.fps * morphSpeed;
+    const f0 = ((Math.floor(t) % anim.frames) + anim.frames) % anim.frames;
+    const f1 = (f0 + 1) % anim.frames;
+    const frac = t - Math.floor(t);
+    const V3 = anim.nverts * 3, P = anim.positions, o0 = f0 * V3, o1 = f1 * V3;
+    const pos = geom.attributes.position.array;
+    for (let i = 0; i < V3; i++) pos[i] = P[o0 + i] * (1 - frac) + P[o1 + i] * frac;
+    geom.attributes.position.needsUpdate = true;
+    geom.computeVertexNormals();
+  }
+});
 
 export const objectsGroup = new THREE.Group();
 objectsGroup.name = 'objects';
@@ -90,7 +119,7 @@ function collectBatches(zone, packs) {
         const out = ifoMatrix(rec, new THREE.Matrix4());
         const key = `MORPH|${row.mesh}|${row.mat || ''}`;
         let b = byKey.get(key);
-        if (!b) { b = { mesh: row.mesh, mat: row.mat, flags: { alpha_test: true, two_side: true }, matrices: [], picks: [] }; byKey.set(key, b); }
+        if (!b) { b = { mesh: row.mesh, mat: row.mat, flags: { alpha_test: true, two_side: true }, matrices: [], picks: [], morphMot: row.mot }; byKey.set(key, b); }
         b.matrices.push(out);
         b.picks.push({ tile: [t.x, t.y], lump: 'MORPH', idx: rec.idx });
       }
@@ -128,6 +157,10 @@ export async function buildObjects(zone, packs) {
     objectsGroup.add(inst);
     geo.computeBoundingBox();
     box.union(geo.boundingBox);
+    // MORPH with a motion clip -> play its vertex animation on this geometry.
+    if (b.morphMot) {
+      getAnim(b.morphMot, b.mesh).then(anim => { if (anim) registerMorphAnim(geo, anim); }).catch(() => {});
+    }
   }));
   return box;
 }
@@ -144,6 +177,7 @@ async function buildGeometry(meshPath) {
 }
 
 export function clearObjects() {
+  morphAnims.length = 0;
   for (const m of [...objectsGroup.children]) {
     objectsGroup.remove(m);
     m.geometry?.dispose();
