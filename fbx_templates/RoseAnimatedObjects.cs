@@ -85,16 +85,21 @@ public static class RoseAnimatedObjects
             int n = 0;
             foreach (var stat in targets)
             {
-                var inst = (GameObject)PrefabUtility.InstantiatePrefab(fbxAsset);
+                // Plain Instantiate (not a prefab instance) so components are
+                // freely editable; the mesh/material assets stay shared.
+                var inst = (GameObject)Object.Instantiate(fbxAsset);
                 inst.name = "ANIM__" + obj.stem + "__" + (n++);
                 inst.transform.SetParent(stat, false);                 // inherit static's world transform
                 inst.transform.localPosition = Vector3.zero;
                 inst.transform.localRotation = rot;
                 inst.transform.localScale = Vector3.one;
 
-                var anim = inst.GetComponent<Animator>() ?? inst.AddComponent<Animator>();
+                // TryGetComponent avoids the Unity "fake-null" trap that ?? hits.
+                if (!inst.TryGetComponent<Animator>(out var anim))
+                    anim = inst.AddComponent<Animator>();
                 anim.runtimeAnimatorController = ctrl;
-                if (inst.GetComponent<RoseAnimationSpeed>() == null) inst.AddComponent<RoseAnimationSpeed>();
+                if (!inst.TryGetComponent<RoseAnimationSpeed>(out _))
+                    inst.AddComponent<RoseAnimationSpeed>();
 
                 // Hide the static (keep it active so the child stays placed).
                 foreach (var r in stat.GetComponents<Renderer>()) r.enabled = false;
