@@ -91,16 +91,21 @@ Shader "ROSE/URP/Lit"
                 return OUT;
             }
 
-            half4 frag(Varyings IN) : SV_Target
+            half4 frag(Varyings IN, FRONT_FACE_TYPE facing : FRONT_FACE_SEMANTIC) : SV_Target
             {
                 half4 tex = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, IN.uv) * _BaseColor;
                 #ifdef _ALPHATEST_ON
                     clip(tex.a - _Cutoff);
                 #endif
 
+                // Two-sided lighting: flip the normal on back faces so surfaces
+                // light correctly regardless of which way their normals point
+                // (the terrain's are inverted by its winding).
+                half3 N = normalize(IN.normalWS) * IS_FRONT_VFACE(facing, 1.0, -1.0);
+
                 InputData inputData = (InputData)0;
                 inputData.positionWS      = IN.positionWS;
-                inputData.normalWS        = normalize(IN.normalWS);
+                inputData.normalWS        = N;
                 inputData.viewDirectionWS = GetWorldSpaceNormalizeViewDir(IN.positionWS);
                 inputData.shadowCoord     = TransformWorldToShadowCoord(IN.positionWS);
                 inputData.fogCoord        = IN.fogCoord;

@@ -95,6 +95,30 @@ public static class AssignRoseMaterials
         Debug.Log($"[ROSE] created {made} materials ({(custom ? "ROSE/URP/Lit" : shader.name)}), remapped {remapped} FBX slots.");
     }
 
+    [MenuItem("ROSE/Apply Sky")]
+    public static void ApplySky()
+    {
+        Shader sky = Shader.Find("ROSE/Skybox");
+        if (sky == null) { Debug.LogError("[ROSE] ROSE/Skybox shader not found (is the bundle imported?)."); return; }
+
+        // place the sky material next to materials.json, else Assets root
+        string dir = "Assets";
+        foreach (var g in AssetDatabase.FindAssets("materials t:TextAsset"))
+        {
+            var p = AssetDatabase.GUIDToAssetPath(g);
+            if (p.EndsWith("materials.json")) { dir = Path.GetDirectoryName(p).Replace('\\', '/'); break; }
+        }
+        string matPath = dir + "/ROSE_Sky.mat";
+        var mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+        if (mat == null) { mat = new Material(sky) { name = "ROSE_Sky" }; AssetDatabase.CreateAsset(mat, matPath); }
+        else mat.shader = sky;
+        AssetDatabase.SaveAssets();
+
+        RenderSettings.skybox = mat;
+        DynamicGI.UpdateEnvironment();
+        Debug.Log("[ROSE] sky applied -> " + matPath + " (set as Environment skybox)");
+    }
+
     static void ApplyMode(Material mat, string mode)
     {
         switch (mode)

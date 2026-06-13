@@ -498,7 +498,8 @@ def build_terrain_tile(glb, t, zon):
                 for iy in range(GPP):
                     for ix in range(GPP):
                         v0 = base + iy * (GPP + 1) + ix
-                        b["idx"] += [v0, v0 + GPP + 1, v0 + 1, v0 + 1, v0 + GPP + 1, v0 + GPP + 2]
+                        # winding chosen so computed normals face UP (+Z)
+                        b["idx"] += [v0, v0 + 1, v0 + GPP + 1, v0 + 1, v0 + GPP + 2, v0 + GPP + 1]
                 b["n"] += (GPP + 1) * (GPP + 1)
         for ti, b in buckets.items():
             posA = np.array(b["pos"], dtype=np.float32)

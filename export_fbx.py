@@ -102,6 +102,8 @@ def build(key, out_root=None):
                  os.path.join(bundle, "Editor", "AssignRoseMaterials.cs"))
     shutil.copy2(os.path.join(TEMPLATES, "ROSE_URP_Lit.shader"),
                  os.path.join(bundle, "Shaders", "ROSE_URP_Lit.shader"))
+    shutil.copy2(os.path.join(TEMPLATES, "ROSE_Skybox.shader"),
+                 os.path.join(bundle, "Shaders", "ROSE_Skybox.shader"))
     shutil.copy2(os.path.join(TEMPLATES, "assign_rose_materials_ue.py"),
                  os.path.join(bundle, "UE5", "assign_rose_materials_ue.py"))
     shutil.copy2(os.path.join(TEMPLATES, "README.txt"), os.path.join(bundle, "README.txt"))

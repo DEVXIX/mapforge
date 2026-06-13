@@ -26,6 +26,9 @@ to a stock shader automatically.
    -> builds a material per slot using the custom shader  ROSE/URP/Lit,
       wires the texture, sets opaque / cutout / transparent + two-sided, and
       remaps the FBX material slots. Drag the FBX into your scene.
+4. (Optional) Menu:  ROSE > Apply Sky
+   -> creates a ROSE/Skybox material (soft blue gradient + drifting clouds)
+      and sets it as the scene's Environment skybox.
 
 --------------------------------------------------------------------------
 UNREAL ENGINE 5
