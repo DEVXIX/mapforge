@@ -70,7 +70,7 @@ def build(key, out_root=None, frame_stride=1):
             placements.setdefault(o.object_id, []).append(
                 {"pos": list(o.pos), "rot": list(o.rot), "scale": list(o.scale)})
 
-    anims, skipped = {}, []
+    objects, skipped = [], []
     for oid in sorted(placements):
         mesh_rel = stb.get(oid, 1)
         mot_rel = stb.get(oid, 2)
@@ -98,6 +98,13 @@ def build(key, out_root=None, frame_stride=1):
                 ch = pos_ch.get(v)
                 verts[fi, v] = np.array(ch.frames[f], dtype=np.float32) if ch else rest[v]
 
+        # Re-orient to match the map's static MORPH meshes. The map goes
+        # ROSE -> glTF -> Blender -> FBX; Blender's glTF importer adds +90deg X
+        # that this direct from_pydata build never sees, so the FBX comes out
+        # rotated vs the map. Pre-rotate +90 X here (x, y, z) -> (x, -z, y) so the
+        # Unity script can drop these straight onto the static placements.
+        verts = np.stack([verts[..., 0], -verts[..., 2], verts[..., 1]], axis=-1).astype(np.float32)
+
         faces = np.array(zms.faces, dtype=np.int32)
         uvs = np.array(zms.uvs[0], dtype=np.float32) if zms.uvs else np.zeros((nv, 2), np.float32)
         name = os.path.splitext(os.path.basename(mesh_rel))[0]
@@ -107,19 +114,23 @@ def build(key, out_root=None, frame_stride=1):
         subprocess.run([BLENDER, "--background", "--python",
                         os.path.join(_HERE, "blender_vertex_anim.py"), "--", npz, fbx], check=True)
         os.remove(npz)
-        anims[oid] = {"fbx": name + ".fbx", "frames": len(frames),
-                      "fps": zmo.fps, "verts": nv}
+        objects.append({
+            "oid": oid, "stem": name, "fbx": name + ".fbx",
+            "match": "MORPH__%s" % name,     # static map nodes are named MORPH__<stem>__<n>
+            "frames": len(frames), "fps": zmo.fps, "verts": nv,
+            "placements": len(placements[oid]),
+        })
 
     manifest = {
         "zone": key,
         "rose_to_unity": {"rotate_x_deg": -90, "scale": 0.01},   # same as the map glb root
-        "anims": anims,
-        "placements": placements,
+        "objects": objects,
+        "skipped": [{"oid": o, "reason": r} for o, r in skipped],
     }
     with open(os.path.join(out, "animations.json"), "w") as f:
         json.dump(manifest, f, indent=1)
 
-    return {"out": out, "animated_objects": len(anims),
+    return {"out": out, "animated_objects": len(objects),
             "placements": sum(len(v) for v in placements.values()),
             "skipped": skipped}
 

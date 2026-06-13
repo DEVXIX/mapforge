@@ -27,6 +27,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 import export_map
+import export_anim
 
 BLENDER = os.environ.get("BLENDER_EXE",
                          r"C:/Program Files/Blender Foundation/Blender 5.0/blender.exe")
@@ -100,13 +101,32 @@ def build(key, out_root=None):
     # 5. editor scripts + shader + readme
     shutil.copy2(os.path.join(TEMPLATES, "AssignRoseMaterials.cs"),
                  os.path.join(bundle, "Editor", "AssignRoseMaterials.cs"))
+    shutil.copy2(os.path.join(TEMPLATES, "RoseAnimatedObjects.cs"),
+                 os.path.join(bundle, "Editor", "RoseAnimatedObjects.cs"))
     shutil.copy2(os.path.join(TEMPLATES, "ROSE_URP_Lit.shader"),
                  os.path.join(bundle, "Shaders", "ROSE_URP_Lit.shader"))
     shutil.copy2(os.path.join(TEMPLATES, "ROSE_Skybox.shader"),
                  os.path.join(bundle, "Shaders", "ROSE_Skybox.shader"))
+    shutil.copy2(os.path.join(TEMPLATES, "RoseAnimationSpeed.cs"),     # runtime (not in Editor/)
+                 os.path.join(bundle, "RoseAnimationSpeed.cs"))
     shutil.copy2(os.path.join(TEMPLATES, "assign_rose_materials_ue.py"),
                  os.path.join(bundle, "UE5", "assign_rose_materials_ue.py"))
     shutil.copy2(os.path.join(TEMPLATES, "README.txt"), os.path.join(bundle, "README.txt"))
+
+    # 5b. animated MORPH objects (waving banners, streaming water) -> Animations/
+    anim_stats = None
+    try:
+        print("[fbx] baking animated objects…")
+        export_anim.build(key, out_root=bundle)               # creates <bundle>/<key>_anim
+        src_anim = os.path.join(bundle, "%s_anim" % key)
+        dst_anim = os.path.join(bundle, "Animations")
+        if os.path.isdir(src_anim):
+            if os.path.isdir(dst_anim):
+                shutil.rmtree(dst_anim)
+            shutil.move(src_anim, dst_anim)
+            anim_stats = {"fbx": len([f for f in os.listdir(dst_anim) if f.lower().endswith(".fbx")])}
+    except Exception as e:
+        print("  [fbx] animation bake skipped: %s" % e)
 
     # cleanup the intermediate glb + its sidecar (bundle is FBX-only)
     for p in (glb, glb + ".materials.json"):
@@ -129,6 +149,7 @@ def build(key, out_root=None):
         "fbx_bytes": os.path.getsize(fbx),
         "textures": len(os.listdir(os.path.join(bundle, "Textures"))),
         "materials": len(minfo),
+        "animations": anim_stats["fbx"] if anim_stats else 0,
         "zip_bytes": os.path.getsize(zip_path),
     }
 

@@ -325,6 +325,7 @@ def export(key, out_path):
 
     # mesh+material bucket -> gltf mesh index
     bucket_mesh = {}
+    morph_node_count = {}     # mesh stem -> running count (names the static MORPH nodes)
 
     def get_bucket_mesh(mesh_rel, mat_rel, flags):
         bkey = (mesh_rel, mat_rel)
@@ -395,7 +396,8 @@ def export(key, out_path):
                     if mi is not None:
                         obj_nodes.append(glb.node(mesh=mi, matrix=world[i].flatten(order="F")))
 
-        # MORPH
+        # MORPH — named per object stem so the Unity animation script can find
+        # each static placement and drop the matching animated prefab onto it.
         ml = ifo.lumps.get(RI.LUMP_MORPH)
         if ml and morph_rows:
             for o in ml.objects:
@@ -406,7 +408,11 @@ def export(key, out_path):
                     continue
                 mi = get_bucket_mesh(row["mesh"], row["mat"], {"alpha_test": True, "two_side": True})
                 if mi is not None:
-                    obj_nodes.append(glb.node(mesh=mi, matrix=compose(o.pos, o.rot, o.scale).flatten(order="F")))
+                    mstem = os.path.splitext(os.path.basename(row["mesh"]))[0]
+                    n = morph_node_count.get(mstem, 0)
+                    morph_node_count[mstem] = n + 1
+                    obj_nodes.append(glb.node(mesh=mi, name="MORPH__%s__%d" % (mstem, n),
+                                              matrix=compose(o.pos, o.rot, o.scale).flatten(order="F")))
 
         # terrain
         t = Z.tile_terrain_json(x, y, stem, center_y=cy)

@@ -5,8 +5,11 @@ Contents:
   <zone>.fbx              the whole map (terrain + objects + collision), one FBX.
   Textures/               every texture as PNG (deduplicated).
   materials.json          manifest: material name -> texture + alpha mode + 2-sided.
-  Editor/                 Unity editor script that auto-assigns materials.
+  Editor/                 Unity editor scripts (assign materials, place animations).
   Shaders/                custom URP shader (ROSE/URP/Lit) the materials use.
+  RoseAnimationSpeed.cs   runtime script to scale an animated object's playback speed.
+  Animations/             vertex-animated objects (waving banners, streaming water)
+                          as FBX clips + animations.json (the placement manifest).
   UE5/                    UE5 editor script that auto-assigns materials.
 
 Materials are NOT baked into the FBX on purpose — the material SLOTS are named
@@ -29,6 +32,15 @@ to a stock shader automatically.
 4. (Optional) Menu:  ROSE > Apply Sky
    -> creates a ROSE/Skybox material (soft blue gradient + drifting clouds)
       and sets it as the scene's Environment skybox.
+5. (Optional) Animations — waving banners + streaming water:
+   With the map in your scene, menu:  ROSE > Animate Map Objects
+   -> for every static banner/water in the map it drops the matching animated
+      mesh on top (perfectly aligned — it reuses the static placement), wires a
+      looping Animator + a RoseAnimationSpeed component, and hides the static one.
+      Adjust speed via the RoseAnimationSpeed component (1 = normal, 0 = paused).
+      Revert with  ROSE > Remove Animated Objects.
+   If an animated mesh comes in rotated, open Editor/RoseAnimatedObjects.cs and
+   tweak EXTRA_EULER (e.g. (90,0,0)), then re-run.
 
 --------------------------------------------------------------------------
 UNREAL ENGINE 5
