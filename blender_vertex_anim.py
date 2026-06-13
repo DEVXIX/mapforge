@@ -38,7 +38,12 @@ mesh.update()
 if uvs is not None and len(uvs) == V:
     uvl = mesh.uv_layers.new(name="UV0")
     for loop in mesh.loops:
-        uvl.data[loop.index].uv = (float(uvs[loop.vertex_index][0]), float(uvs[loop.vertex_index][1]))
+        vi = loop.vertex_index
+        # ZMS UVs are DirectX (V from top). The map's static meshes go through
+        # glTF (Blender's importer flips V to its bottom-origin convention), so to
+        # share the map's material the animated mesh must flip V the same way —
+        # otherwise the texture maps mirrored/scrambled vs the static banner.
+        uvl.data[loop.index].uv = (float(uvs[vi][0]), 1.0 - float(uvs[vi][1]))
 
 # basis + per-frame shape keys
 obj.shape_key_add(name="Basis")

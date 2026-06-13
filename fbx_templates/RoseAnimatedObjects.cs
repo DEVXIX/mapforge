@@ -48,7 +48,8 @@ public static class RoseAnimatedObjects
         bool mapAdded = EnsureMapInScene(out bool mapFound);  // 2. map into the scene
         int spawned = 0, missing = 0;
         if (mapFound || SceneHasMap()) AnimateCore(ref spawned, ref missing);  // 3. animations
-        TryMenu("ROSE/Apply Sky");                        // 4. sky
+        int colliders = AddColliders();                   // 4. walkable mesh colliders
+        TryMenu("ROSE/Apply Sky");                        // 5. sky
 
         EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
         string msg = "Setup complete.\n" +
@@ -56,6 +57,7 @@ public static class RoseAnimatedObjects
             (mapFound ? (mapAdded ? "• Map added to the scene\n" : "• Map already in the scene\n")
                       : "• Map FBX not found — import the whole bundle folder, then re-run.\n") +
             $"• {spawned} animated object(s) placed" + (missing > 0 ? $" ({missing} unmatched — see Console)" : "") + "\n" +
+            $"• {colliders} mesh colliders added (terrain/objects walkable; visual 'Collision' boxes hidden)\n" +
             "• Sky applied\n\nPress Play to see the banners/water animate.\n" +
             "Adjust speed via the RoseAnimationSpeed component.";
         EditorUtility.DisplayDialog("ROSE — Setup Scene", msg, "OK");
@@ -88,6 +90,57 @@ public static class RoseAnimatedObjects
                     foreach (var r in t.GetComponents<Renderer>()) r.enabled = true;
             }
         EditorUtility.DisplayDialog("ROSE", $"Removed {removed} animated object(s) and restored the static meshes.", "OK");
+    }
+
+    [MenuItem("ROSE/Add Colliders")]
+    static void AddCollidersMenu()
+    {
+        int n = AddColliders();
+        EditorUtility.DisplayDialog("ROSE",
+            n > 0 ? $"Added MeshColliders to {n} map meshes — terrain, buildings and props are now solid/walkable.\n" +
+                    "The visual 'Collision' boxes + walk grid were hidden (they're not real colliders)."
+                  : "No map found in the scene. Add the map first (ROSE > Setup Scene).", "OK");
+    }
+
+    // Give every map mesh a MeshCollider so the scene is walkable; hide the
+    // export's visual-only Collision boxes + WalkBlocked grid (useless in Unity).
+    static int AddColliders()
+    {
+        var mapRoot = FindMapRoot();
+        if (mapRoot == null) return 0;
+        int added = 0;
+        foreach (var mf in mapRoot.GetComponentsInChildren<MeshFilter>(true))
+        {
+            var go = mf.gameObject;
+            if (go.name.StartsWith("ANIM__")) continue;                 // animated overlays: no collider
+            if (IsUnderCollision(go.transform))                         // visual collision boxes / walk grid
+            {
+                foreach (var r in go.GetComponents<Renderer>()) r.enabled = false;
+                continue;
+            }
+            if (mf.sharedMesh == null) continue;
+            if (go.GetComponent<MeshCollider>() == null)
+            {
+                go.AddComponent<MeshCollider>().sharedMesh = mf.sharedMesh;
+                added++;
+            }
+        }
+        return added;
+    }
+
+    static GameObject FindMapRoot()
+    {
+        foreach (var root in SceneManager.GetActiveScene().GetRootGameObjects())
+            if (root.GetComponentsInChildren<Transform>(true).Any(t => t != null && (t.name.Contains("MORPH__") || t.name == "Terrain")))
+                return root;
+        return null;
+    }
+
+    static bool IsUnderCollision(Transform t)
+    {
+        for (var p = t; p != null; p = p.parent)
+            if (p.name == "Collision" || p.name.Contains("WalkBlocked")) return true;
+        return false;
     }
 
     // ------------------------------------------------------------------- helpers
