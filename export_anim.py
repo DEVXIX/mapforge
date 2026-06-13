@@ -87,14 +87,16 @@ def build(key, out_root=None, frame_stride=1):
             continue
 
         nv = len(zms.positions)
-        scale = 100.0 if zms.version >= 7 else 1.0
+        # ZMO POSITION channels are already in external (mesh*100) scale; only the
+        # non-animated rest verts need the v7 mesh scale to sit at the same size.
+        mesh_scale = 100.0 if zms.version >= 7 else 1.0
         frames = list(range(0, zmo.num_frames, max(1, frame_stride)))
         verts = np.zeros((len(frames), nv, 3), dtype=np.float32)
-        rest = np.array(zms.positions, dtype=np.float32) * scale
+        rest = np.array(zms.positions, dtype=np.float32) * mesh_scale
         for fi, f in enumerate(frames):
             for v in range(nv):
                 ch = pos_ch.get(v)
-                verts[fi, v] = (np.array(ch.frames[f], dtype=np.float32) * scale) if ch else rest[v]
+                verts[fi, v] = np.array(ch.frames[f], dtype=np.float32) if ch else rest[v]
 
         faces = np.array(zms.faces, dtype=np.int32)
         uvs = np.array(zms.uvs[0], dtype=np.float32) if zms.uvs else np.zeros((nv, 2), np.float32)

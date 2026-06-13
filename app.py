@@ -282,7 +282,7 @@ def api_anim():
     if not pos_ch:
         return ("", 204)
     nv = len(zms.positions)
-    scale = 100.0 if zms.version >= 7 else 1.0
+    mesh_scale = 100.0 if zms.version >= 7 else 1.0   # only for non-animated verts
     F = zmo.num_frames
     out = bytearray()
     out += struct.pack("<IIIf", 0x4D4E4152, F, nv, float(zmo.fps))
@@ -290,8 +290,12 @@ def api_anim():
     for f in range(F):
         for v in range(nv):
             ch = pos_ch.get(v)
-            p = ch.frames[f] if ch else rest[v]
-            out += struct.pack("<fff", p[0] * scale, p[1] * scale, p[2] * scale)
+            if ch:                                   # ZMO positions are already external scale
+                p = ch.frames[f]
+                out += struct.pack("<fff", p[0], p[1], p[2])
+            else:                                    # rest vertex -> match with mesh scale
+                p = rest[v]
+                out += struct.pack("<fff", p[0] * mesh_scale, p[1] * mesh_scale, p[2] * mesh_scale)
     return Response(bytes(out), mimetype="application/octet-stream")
 
 
