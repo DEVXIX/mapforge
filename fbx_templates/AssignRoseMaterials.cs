@@ -14,7 +14,7 @@ using UnityEngine.Rendering;
 
 public static class AssignRoseMaterials
 {
-    [System.Serializable] class MatEntry { public string name; public string texture; public bool alpha; public string mode; public bool twosided; public float[] color; }
+    [System.Serializable] class MatEntry { public string name; public string texture; public bool alpha; public string mode; public bool twosided; public float[] color; public string kind; }
     [System.Serializable] class Manifest { public string zone; public string fbx; public MatEntry[] materials; }
 
     [MenuItem("ROSE/Assign Materials")]
@@ -37,6 +37,7 @@ public static class AssignRoseMaterials
         if (!AssetDatabase.IsValidFolder(matDir)) AssetDatabase.CreateFolder(root, "Materials");
 
         Shader rose = Shader.Find("ROSE/URP/Lit");
+        Shader water = Shader.Find("ROSE/Water");
         Shader fallback = Shader.Find("Universal Render Pipeline/Lit");
         if (fallback == null) fallback = Shader.Find("Standard");
         bool custom = rose != null;
@@ -47,6 +48,17 @@ public static class AssignRoseMaterials
         int made = 0;
         foreach (var e in manifest.materials)
         {
+            // OCEAN water -> custom animated ROSE/Water shader
+            if (e.kind == "water" && water != null)
+            {
+                var wm = new Material(water) { name = e.name };
+                if (e.color != null && e.color.Length >= 4)
+                    wm.SetColor("_DeepColor", new Color(e.color[0], e.color[1], e.color[2], e.color[3]));
+                AssetDatabase.CreateAsset(wm, matDir + "/" + e.name + ".mat");
+                byName[e.name] = wm; made++;
+                continue;
+            }
+
             var mat = new Material(shader) { name = e.name };
 
             Texture2D tex = null;

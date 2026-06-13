@@ -160,8 +160,8 @@ class Glb:
         self.textures.append({"source": len(self.images) - 1, "sampler": 0})
         return len(self.textures) - 1
 
-    def material_for_texture(self, abs_path, alpha=False, mode="OPAQUE", cutoff=0.5, double=False, color=None):
-        key = (abs_path, alpha, mode, double, tuple(color) if color else None)
+    def material_for_texture(self, abs_path, alpha=False, mode="OPAQUE", cutoff=0.5, double=False, color=None, kind=None):
+        key = (abs_path, alpha, mode, double, tuple(color) if color else None, kind)
         if key in self._tex_cache:
             return self._tex_cache[key]
         idx = len(self.materials)
@@ -193,6 +193,7 @@ class Glb:
             "name": name, "texture": "%s.png" % name,
             "texture_src": abs_path, "alpha": bool(alpha), "mode": mode,
             "twosided": bool(double), "color": list(color) if color else None,
+            "kind": kind,
         })
         self._tex_cache[key] = idx
         return idx
@@ -307,7 +308,7 @@ def export(key, out_path):
     cy = zon.info.center_y or 32
     glb = Glb()
 
-    obj_nodes, terr_nodes, col_nodes = [], [], []
+    obj_nodes, terr_nodes, col_nodes, water_nodes = [], [], [], []
 
     # ---- packs ----
     packs = {}
@@ -426,6 +427,11 @@ def export(key, out_path):
                                           matrix=compose(o.pos, o.rot,
                                                          [max(1, s) for s in o.scale]).flatten(order="F")))
 
+        # OCEAN water surfaces -> flat translucent quads (ROSE/Water URP shader)
+        ol = ifo.lumps.get(RI.LUMP_OCEAN)
+        if ol and ol.ocean and ol.ocean.blocks:
+            water_nodes += build_water_blocks(glb, ol.ocean.blocks)
+
     # MOV walk grid -> collision mesh
     mov_node = build_mov_mesh(glb, z, cy)
     if mov_node is not None:
@@ -438,6 +444,8 @@ def export(key, out_path):
         roots.append(glb.node(name="Terrain", children=terr_nodes))
     if col_nodes:
         roots.append(glb.node(name="Collision", children=col_nodes))
+    if water_nodes:
+        roots.append(glb.node(name="Water", children=water_nodes))
 
     glb.write(out_path, roots)
     # Sidecar manifest: material name -> texture + flags (the join key for the
@@ -445,8 +453,8 @@ def export(key, out_path):
     with open(out_path + ".materials.json", "w") as f:
         json.dump({"zone": key, "materials": glb.material_info}, f, indent=1)
     return {"objects": len(obj_nodes), "terrain": len(terr_nodes), "collision": len(col_nodes),
-            "meshes": len(glb.meshes), "textures": len(glb.textures), "bytes": os.path.getsize(out_path),
-            "material_info": glb.material_info}
+            "water": len(water_nodes), "meshes": len(glb.meshes), "textures": len(glb.textures),
+            "bytes": os.path.getsize(out_path), "material_info": glb.material_info}
 
 
 def cube_mesh(glb):
@@ -528,6 +536,30 @@ def build_terrain_tile(glb, t, zon):
 
     layer(lambda ty: ty[0] + ty[2], False, False)   # down layer
     layer(lambda ty: ty[1] + ty[3], True, True)     # up (grass) layer
+    return nodes
+
+
+WATER_TILE = 2400.0   # world units per water-texture tile (UV scale for the shader)
+
+def build_water_blocks(glb, blocks):
+    """Flat translucent quads over each OCEAN block, at its water height. The
+    material is flagged kind='water' so the editor scripts give it ROSE/Water."""
+    nodes = []
+    wmat = glb.material_for_texture(None, mode="BLEND", double=True,
+                                    color=[0.10, 0.32, 0.46, 0.80], kind="water")
+    for s, e in blocks:
+        x0, x1 = min(s[0], e[0]), max(s[0], e[0])
+        y0, y1 = min(s[1], e[1]), max(s[1], e[1])
+        zz = max(s[2], e[2])
+        if x1 - x0 <= 0 or y1 - y0 <= 0:
+            continue
+        verts = np.array([[x0, y0, zz], [x1, y0, zz], [x1, y1, zz], [x0, y1, zz]], dtype=np.float32)
+        uvs = np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=np.float32) / WATER_TILE
+        idx = np.array([0, 1, 2, 0, 2, 3], dtype=np.uint32)         # winding -> +Z up
+        nrm = np.tile([0.0, 0.0, 1.0], (4, 1)).astype(np.float32)
+        pa = glb.add_vec3(verts); na = glb.add_vec3(nrm)
+        ua = glb.add_vec2(uvs); ia = glb.add_indices(idx)
+        nodes.append(glb.node(mesh=glb.mesh(pa, ia, wmat, normal_acc=na, uv_acc=ua), name="Water"))
     return nodes
 
 
