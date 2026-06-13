@@ -1,17 +1,16 @@
 // ROSE map — auto-assign materials & textures from the bundle manifest.
 //
-// SETUP: drop the whole extracted bundle folder into your project's Assets/
-//        (e.g. Assets/ROSE/ containing the .fbx, materials.json, Textures/,
-//        and this script). Unity will import the FBX and textures.
+// Builds one material per slot using the custom URP shader "ROSE/URP/Lit"
+// (ships next to this script as ROSE_URP_Lit.shader), wires the texture, sets
+// opaque / cutout / transparent + two-sided, and remaps the FBX material slots.
 //
-// RUN:   menu  ROSE > Assign Materials  — it reads materials.json, builds a
-//        material per entry (URP Lit or Standard), points it at the matching
-//        texture, sets opaque/cutout/transparent, and remaps the FBX's
-//        material slots to them.
+// SETUP: drop the whole extracted bundle folder into Assets/ (so Unity imports
+//        the FBX, textures, AND the .shader). Then menu: ROSE > Assign Materials.
 using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 public static class AssignRoseMaterials
 {
@@ -21,10 +20,9 @@ public static class AssignRoseMaterials
     [MenuItem("ROSE/Assign Materials")]
     public static void Run()
     {
-        // find materials.json anywhere under Assets
-        string[] hits = AssetDatabase.FindAssets("materials t:TextAsset");
+        // locate materials.json under Assets
         string manifestPath = null;
-        foreach (var g in hits)
+        foreach (var g in AssetDatabase.FindAssets("materials t:TextAsset"))
         {
             var p = AssetDatabase.GUIDToAssetPath(g);
             if (p.EndsWith("materials.json")) { manifestPath = p; break; }
@@ -38,10 +36,12 @@ public static class AssignRoseMaterials
         var matDir = root + "/Materials";
         if (!AssetDatabase.IsValidFolder(matDir)) AssetDatabase.CreateFolder(root, "Materials");
 
-        Shader urp = Shader.Find("Universal Render Pipeline/Lit");
-        Shader std = Shader.Find("Standard");
-        bool isURP = urp != null;
-        Shader shader = isURP ? urp : std;
+        Shader rose = Shader.Find("ROSE/URP/Lit");
+        Shader fallback = Shader.Find("Universal Render Pipeline/Lit");
+        if (fallback == null) fallback = Shader.Find("Standard");
+        bool custom = rose != null;
+        Shader shader = custom ? rose : fallback;
+        if (!custom) Debug.LogWarning("[ROSE] ROSE/URP/Lit not found (is the .shader imported & URP active?). Falling back to " + shader.name);
 
         var byName = new Dictionary<string, Material>();
         int made = 0;
@@ -53,29 +53,21 @@ public static class AssignRoseMaterials
             if (!string.IsNullOrEmpty(e.texture))
                 tex = AssetDatabase.LoadAssetAtPath<Texture2D>(root + "/Textures/" + e.texture);
 
-            if (tex != null)
+            if (custom)
             {
-                if (isURP) mat.SetTexture("_BaseMap", tex);
-                else mat.SetTexture("_MainTex", tex);
+                if (tex != null) mat.SetTexture("_BaseMap", tex);
+                ApplyMode(mat, e.mode);
+                mat.SetFloat("_Cull", e.twosided ? 0f : 2f);   // 0 = Off (two-sided), 2 = Back
+            }
+            else // stock fallback
+            {
+                bool isURP = shader.name.Contains("Universal");
+                if (tex != null) mat.SetTexture(isURP ? "_BaseMap" : "_MainTex", tex);
+                if (e.mode == "MASK") mat.EnableKeyword("_ALPHATEST_ON");
+                if (e.twosided && isURP) mat.SetFloat("_Cull", 0f);
             }
 
-            // transparency
-            if (e.mode == "MASK")
-            {
-                if (isURP) { mat.SetFloat("_AlphaClip", 1f); mat.SetFloat("_Cutoff", 0.5f); mat.EnableKeyword("_ALPHATEST_ON"); }
-                else { mat.SetFloat("_Mode", 1f); mat.SetOverrideTag("RenderType", "TransparentCutout"); mat.EnableKeyword("_ALPHATEST_ON"); }
-            }
-            else if (e.mode == "BLEND")
-            {
-                if (isURP) { mat.SetFloat("_Surface", 1f); mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT"); }
-                else { mat.SetFloat("_Mode", 3f); mat.SetOverrideTag("RenderType", "Transparent"); mat.EnableKeyword("_ALPHABLEND_ON"); }
-            }
-
-            // two-sided foliage/terrain (URP exposes _Cull; 0 = render both faces)
-            if (e.twosided && isURP) mat.SetFloat("_Cull", 0f);
-
-            var matPath = matDir + "/" + e.name + ".mat";
-            AssetDatabase.CreateAsset(mat, matPath);
+            AssetDatabase.CreateAsset(mat, matDir + "/" + e.name + ".mat");
             byName[e.name] = mat;
             made++;
         }
@@ -100,6 +92,38 @@ public static class AssignRoseMaterials
             }
             importer.SaveAndReimport();
         }
-        Debug.Log($"[ROSE] created {made} materials, remapped {remapped} FBX slots. ({(isURP ? "URP" : "Built-in")})");
+        Debug.Log($"[ROSE] created {made} materials ({(custom ? "ROSE/URP/Lit" : shader.name)}), remapped {remapped} FBX slots.");
+    }
+
+    static void ApplyMode(Material mat, string mode)
+    {
+        switch (mode)
+        {
+            case "MASK":   // cutout / foliage
+                mat.EnableKeyword("_ALPHATEST_ON");
+                mat.SetFloat("_AlphaClip", 1f);
+                mat.SetFloat("_Cutoff", 0.5f);
+                mat.SetFloat("_SrcBlend", (float)BlendMode.One);
+                mat.SetFloat("_DstBlend", (float)BlendMode.Zero);
+                mat.SetFloat("_ZWrite", 1f);
+                mat.renderQueue = (int)RenderQueue.AlphaTest;
+                break;
+            case "BLEND":  // transparent / grass overlay + water
+                mat.DisableKeyword("_ALPHATEST_ON");
+                mat.SetFloat("_AlphaClip", 0f);
+                mat.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+                mat.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
+                mat.SetFloat("_ZWrite", 0f);
+                mat.renderQueue = (int)RenderQueue.Transparent;
+                break;
+            default:       // OPAQUE
+                mat.DisableKeyword("_ALPHATEST_ON");
+                mat.SetFloat("_AlphaClip", 0f);
+                mat.SetFloat("_SrcBlend", (float)BlendMode.One);
+                mat.SetFloat("_DstBlend", (float)BlendMode.Zero);
+                mat.SetFloat("_ZWrite", 1f);
+                mat.renderQueue = (int)RenderQueue.Geometry;
+                break;
+        }
     }
 }

@@ -43,7 +43,8 @@ def build(key, out_root=None):
     if os.path.isdir(bundle):
         shutil.rmtree(bundle)
     os.makedirs(os.path.join(bundle, "Textures"))
-    os.makedirs(os.path.join(bundle, "UnityEditor"))
+    os.makedirs(os.path.join(bundle, "Editor"))      # Unity special folder: editor scripts
+    os.makedirs(os.path.join(bundle, "Shaders"))     # runtime shader (URP)
     os.makedirs(os.path.join(bundle, "UE5"))
 
     # 1. glTF (intermediate) + material info
@@ -96,9 +97,11 @@ def build(key, out_root=None):
     with open(os.path.join(bundle, "materials.json"), "w") as f:
         json.dump({"zone": key, "fbx": "%s.fbx" % key, "materials": minfo}, f, indent=1)
 
-    # 5. editor scripts + readme
+    # 5. editor scripts + shader + readme
     shutil.copy2(os.path.join(TEMPLATES, "AssignRoseMaterials.cs"),
-                 os.path.join(bundle, "UnityEditor", "AssignRoseMaterials.cs"))
+                 os.path.join(bundle, "Editor", "AssignRoseMaterials.cs"))
+    shutil.copy2(os.path.join(TEMPLATES, "ROSE_URP_Lit.shader"),
+                 os.path.join(bundle, "Shaders", "ROSE_URP_Lit.shader"))
     shutil.copy2(os.path.join(TEMPLATES, "assign_rose_materials_ue.py"),
                  os.path.join(bundle, "UE5", "assign_rose_materials_ue.py"))
     shutil.copy2(os.path.join(TEMPLATES, "README.txt"), os.path.join(bundle, "README.txt"))
