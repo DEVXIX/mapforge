@@ -10,7 +10,23 @@ import { saveOps } from './api.js';
 const gizmo = new TransformControls(camera, renderer.domElement);
 gizmo.setSpace('world');
 scene.add(gizmo);
-gizmo.addEventListener('dragging-changed', e => { controls.enabled = !e.value; });
+
+// Undo/redo: snapshot the selection's transform at gizmo drag start, and on
+// drag end push an entry that can restore (undo) or re-apply (redo) it.
+let _dragBefore = null;
+gizmo.addEventListener('dragging-changed', e => {
+  controls.enabled = !e.value;
+  if (e.value) {
+    _dragBefore = state.pick ? snapshotSelection() : null;
+  } else if (_dragBefore && state.pick) {
+    const after = snapshotSelection();
+    if (!sameXform(_dragBefore, after)) {
+      const before = _dragBefore;
+      pushUndo({ undo: () => applyTransform(before), redo: () => applyTransform(after) });
+    }
+    _dragBefore = null;
+  }
+});
 
 const state = {
   pick: null, kind: null,
@@ -23,6 +39,8 @@ const state = {
 const updates = new Map();     // key -> op
 const structural = [];         // add/delete ops in order
 const movCells = new Map();    // "tx,ty" -> Map("row,col" -> val)
+const undoStack = [];          // { undo, redo } entries
+const redoStack = [];
 
 let _zoneKey = null;
 let _onChange = () => {};
@@ -122,6 +140,60 @@ export function hasSelection() { return !!state.pick; }
 export function selectedPick() { return state.pick; }
 export function selectedRec() { return state.rec; }
 
+// ---- undo / redo --------------------------------------------------------
+function snapshotSelection() {
+  return {
+    kind: state.kind, inst: state.inst, instId: state.instId, marker: state.marker, pick: state.pick,
+    pos: [...state.rec.pos], rot: [...state.rec.rot], scale: [...state.rec.scale],
+  };
+}
+
+function sameXform(a, b) {
+  const eq = (x, y) => x.every((v, i) => Math.abs(v - y[i]) < 1e-4);
+  return eq(a.pos, b.pos) && eq(a.rot, b.rot) && eq(a.scale, b.scale);
+}
+
+// Restore a snapshot's transform onto its instance/marker, re-queue the matching
+// edit, and (if it's the live selection) move the gizmo proxy + highlight too.
+function applyTransform(snap) {
+  const pos = new THREE.Vector3(snap.pos[0], snap.pos[1], snap.pos[2]);
+  const q = new THREE.Quaternion(snap.rot[0], snap.rot[1], snap.rot[2], snap.rot[3]);
+  const s = new THREE.Vector3(snap.scale[0], snap.scale[1], snap.scale[2]);
+  if (snap.kind === 'object' && snap.inst) {
+    snap.inst.setMatrixAt(snap.instId, new THREE.Matrix4().compose(pos, q, s));
+    snap.inst.instanceMatrix.needsUpdate = true;
+  } else if (snap.kind === 'marker' && snap.marker) {
+    const zAdj = markerZAdjust(snap.pick.lump);
+    snap.marker.position.set(pos.x, pos.y, pos.z + zAdj);
+    snap.marker.updateMatrixWorld(true);
+  }
+  queueUpdate({ op: 'update', tile: snap.pick.tile, lump: snap.pick.lump, idx: snap.pick.idx,
+                pos: snap.pos, rot: snap.rot, scale: snap.scale });
+  if (state.pick && key(state.pick) === key(snap.pick)) {
+    if (state.kind === 'object' && state.proxy) {
+      state.proxy.position.copy(pos); state.proxy.quaternion.copy(q); state.proxy.scale.copy(s);
+      state.proxy.updateMatrixWorld(true);
+    }
+    if (state.wire) { state.wire.position.copy(pos); state.wire.quaternion.copy(q); state.wire.scale.copy(s); }
+    state.rec.pos = [...snap.pos]; state.rec.rot = [...snap.rot]; state.rec.scale = [...snap.scale];
+  }
+}
+
+function pushUndo(entry) { undoStack.push(entry); redoStack.length = 0; }
+
+export function undo() {
+  const e = undoStack.pop();
+  if (!e) return false;
+  e.undo(); redoStack.push(e); _onChange(pendingCount());
+  return true;
+}
+export function redo() {
+  const e = redoStack.pop();
+  if (!e) return false;
+  e.redo(); undoStack.push(e); _onChange(pendingCount());
+  return true;
+}
+
 // ---- queue --------------------------------------------------------------
 function queueUpdate(op) { updates.set(key(op), op); _onChange(pendingCount()); }
 
@@ -135,12 +207,27 @@ export function queueFieldEdit(pick, fields) {
 }
 
 export function queueDelete(pick) {
-  structural.push({ op: 'delete', tile: pick.tile, lump: pick.lump, idx: pick.idx });
-  updates.delete(key(pick));
+  const op = { op: 'delete', tile: pick.tile, lump: pick.lump, idx: pick.idx };
+  const k = key(pick), prevUpdate = updates.get(k);
+  structural.push(op);
+  updates.delete(k);
+  pushUndo({
+    undo: () => { const i = structural.indexOf(op); if (i >= 0) structural.splice(i, 1);
+                  if (prevUpdate) updates.set(k, prevUpdate); _onChange(pendingCount()); },
+    redo: () => { structural.push(op); updates.delete(k); _onChange(pendingCount()); },
+  });
   _onChange(pendingCount());
 }
 
-export function queueAdd(op) { structural.push({ ...op, op: 'add' }); _onChange(pendingCount()); }
+export function queueAdd(op) {
+  const o = { ...op, op: 'add' };
+  structural.push(o);
+  pushUndo({
+    undo: () => { const i = structural.indexOf(o); if (i >= 0) structural.splice(i, 1); _onChange(pendingCount()); },
+    redo: () => { structural.push(o); _onChange(pendingCount()); },
+  });
+  _onChange(pendingCount());
+}
 
 // Queue a cross-map "place" op (backend appends the model + adds the record).
 // Returns the live op object so the caller can mutate pos as the gizmo moves.
@@ -174,7 +261,7 @@ export function pendingCount() {
   return updates.size + structural.length + mov;
 }
 
-function clearQueue() { updates.clear(); structural.length = 0; movCells.clear(); }
+function clearQueue() { updates.clear(); structural.length = 0; movCells.clear(); undoStack.length = 0; redoStack.length = 0; }
 
 function buildOps() {
   const ops = [...updates.values(), ...structural];

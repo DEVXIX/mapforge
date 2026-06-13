@@ -231,6 +231,9 @@ function pickSelect() {
 // ---- hotkeys ------------------------------------------------------------
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
+  // Undo/redo work regardless of fly mode.
+  if (e.ctrlKey && e.code === 'KeyZ' && !e.shiftKey) { e.preventDefault(); setStatus(Editor.undo() ? 'undo' : 'nothing to undo'); return; }
+  if (e.ctrlKey && (e.code === 'KeyY' || (e.code === 'KeyZ' && e.shiftKey))) { e.preventDefault(); setStatus(Editor.redo() ? 'redo' : 'nothing to redo'); return; }
   if (isFlying()) return;          // WASD belongs to the fly camera while RMB held
   if (e.code === 'KeyW') Editor.setGizmoMode('translate');
   if (e.code === 'KeyE') Editor.setGizmoMode('rotate');
