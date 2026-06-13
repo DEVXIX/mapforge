@@ -115,6 +115,9 @@ export function clearSelection() {
 }
 
 export function setGizmoMode(mode) { gizmo.setMode(mode); }
+// True while a gizmo handle is hovered or being dragged — callers must NOT run
+// pick-selection then, or it detaches the gizmo mid-drag (objects won't move).
+export function gizmoBusy() { return gizmo.dragging || gizmo.axis != null; }
 export function hasSelection() { return !!state.pick; }
 export function selectedPick() { return state.pick; }
 export function selectedRec() { return state.rec; }

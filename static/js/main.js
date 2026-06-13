@@ -169,6 +169,7 @@ let painting = false;
 
 renderer.domElement.addEventListener('pointerdown', e => {
   if (e.button !== 0) return;
+  if (Editor.gizmoBusy()) return;   // grabbing a move/rotate/scale handle — let the gizmo drag it
   setPtr(e);
   if (mode === 'paint') { painting = true; doPaint(); return; }
   pickSelect();
@@ -209,6 +210,8 @@ renderer.domElement.addEventListener('drop', e => {
 function pickSelect() {
   ray.setFromCamera(ptr, camera);
   const targets = [...objectsGroup.children];
+  if (npcGroup.visible) targets.push(...npcGroup.children);      // NPCs (MOB) are selectable
+  if (spawnGroup.visible) targets.push(...spawnGroup.children);  // monsters (REGEN) are selectable
   for (const g of Object.values(markerGroups)) if (g.visible) targets.push(...g.children);
   // include placed (unsaved) previews
   scene.children.forEach(o => { if (o.userData && o.userData.kind === 'placed') targets.push(...o.children); });
