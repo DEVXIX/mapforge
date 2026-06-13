@@ -220,14 +220,18 @@ export async function buildObjects(zone, packs) {
     let geo;
     try { geo = await buildGeometry(b.mesh); } catch { return; }
     const flags = b.flags || {};
-    const wantAlpha = !!(flags.alpha_test || flags.alpha);
-    const side = (flags.two_side || wantAlpha) ? THREE.DoubleSide : THREE.FrontSide;
+    // NPC/monster character textures store a non-silhouette (often near-zero)
+    // alpha channel, so honouring their alpha_test cutout discards whole heads
+    // or bodies. Render characters opaque + two-sided instead.
+    const character = !!(b.isNpc || b.isSpawn);
+    const wantAlpha = !character && !!(flags.alpha_test || flags.alpha);
+    const side = (character || flags.two_side || wantAlpha) ? THREE.DoubleSide : THREE.FrontSide;
     let mat;
     if (b.mat) {
       const tex = loadTex(b.mat, wantAlpha);
       mat = new THREE.MeshLambertMaterial({
         map: texturesHidden ? null : tex, color: texturesHidden ? 0xcfcfcf : 0xffffff,
-        side, alphaTest: flags.alpha_test ? (flags.alpha_ref ?? 128) / 255 : 0,
+        side, alphaTest: (!character && flags.alpha_test) ? (flags.alpha_ref ?? 128) / 255 : 0,
       });
       mat.userData.tex = tex;
     } else {
