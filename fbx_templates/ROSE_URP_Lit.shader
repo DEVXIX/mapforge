@@ -15,6 +15,8 @@ Shader "ROSE/URP/Lit"
         [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlend ("Src Blend", Float) = 1   // One
         [Enum(UnityEngine.Rendering.BlendMode)] _DstBlend ("Dst Blend", Float) = 0   // Zero
         [Enum(Off,0,On,1)]                      _ZWrite   ("ZWrite", Float)    = 1
+        _OffsetFactor ("Depth Offset Factor", Float) = 0
+        _OffsetUnits  ("Depth Offset Units",  Float) = 0
     }
 
     SubShader
@@ -43,6 +45,7 @@ Shader "ROSE/URP/Lit"
             Blend [_SrcBlend] [_DstBlend]
             ZWrite [_ZWrite]
             Cull [_Cull]
+            Offset [_OffsetFactor], [_OffsetUnits]   // overlay layers draw just in front (no Z-fight)
 
             HLSLPROGRAM
             #pragma vertex vert

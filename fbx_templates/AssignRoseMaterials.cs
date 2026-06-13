@@ -14,7 +14,7 @@ using UnityEngine.Rendering;
 
 public static class AssignRoseMaterials
 {
-    [System.Serializable] class MatEntry { public string name; public string texture; public bool alpha; public string mode; public bool twosided; }
+    [System.Serializable] class MatEntry { public string name; public string texture; public bool alpha; public string mode; public bool twosided; public float[] color; }
     [System.Serializable] class Manifest { public string zone; public string fbx; public MatEntry[] materials; }
 
     [MenuItem("ROSE/Assign Materials")]
@@ -56,8 +56,16 @@ public static class AssignRoseMaterials
             if (custom)
             {
                 if (tex != null) mat.SetTexture("_BaseMap", tex);
+                // base colour + alpha — color-only materials (collision boxes,
+                // WalkBlocked) need this so they render as their faint colour
+                // instead of solid white.
+                if (e.color != null && e.color.Length >= 4)
+                    mat.SetColor("_BaseColor", new Color(e.color[0], e.color[1], e.color[2], e.color[3]));
                 ApplyMode(mat, e.mode);
                 mat.SetFloat("_Cull", e.twosided ? 0f : 2f);   // 0 = Off (two-sided), 2 = Back
+                // transparent overlays (grass biome blend + collision) draw just
+                // in front of the opaque ground so they don't clip / Z-fight it.
+                if (e.mode == "BLEND") { mat.SetFloat("_OffsetFactor", -1f); mat.SetFloat("_OffsetUnits", -1f); }
             }
             else // stock fallback
             {
