@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>mapforge — ROSE/SHO map editor</title>
+<style>
+  :root { color-scheme: dark; }
+  html,body { margin:0; height:100%; background:#0e0f12; color:#dde;
+              font:13px/1.45 system-ui,sans-serif; overflow:hidden; }
+  #viewport { position:absolute; inset:0; }
+  .panel { position:absolute; background:rgba(18,20,24,.92); border:1px solid #2b2f37;
+           border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,.4); }
+  #left  { top:10px; left:10px; width:270px; padding:12px; max-height:calc(100vh - 20px);
+           overflow-y:auto; }
+  #right { top:10px; right:10px; width:300px; padding:12px; max-height:calc(100vh - 20px);
+           overflow-y:auto; display:none; }
+  #hint  { bottom:10px; left:10px; padding:8px 12px; font-size:12px; color:#9aa; max-width:60%; }
+  h1 { margin:0 0 10px; font-size:14px; font-weight:650; color:#7cc4ff; letter-spacing:.3px; }
+  h2 { margin:10px 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:#8a93a3; }
+  select,button,input { background:#1b1e24; color:#dde; border:1px solid #353a44;
+            border-radius:5px; padding:5px 8px; font:inherit; }
+  select { width:100%; }
+  button { cursor:pointer; }
+  button:hover { border-color:#4a86c8; }
+  button.primary { background:#1d3a5c; color:#bfe0ff; border-color:#2f5e92; }
+  button:disabled { opacity:.4; cursor:default; }
+  .row { display:flex; gap:6px; margin-top:6px; }
+  .row > * { flex:1; }
+  .layer { display:flex; align-items:center; gap:7px; padding:3px 4px; border-radius:4px; font-size:12px; }
+  .layer:hover { background:#1a1d23; }
+  .layer .sw { width:11px; height:11px; border-radius:3px; flex:none; }
+  .layer .ct { margin-left:auto; color:#7a828f; font-variant-numeric:tabular-nums; }
+  .layer input { margin:0; }
+  .tag { font-size:9px; padding:1px 5px; border-radius:7px; font-weight:600; }
+  .tag.server { background:#3a2230; color:#ff9ec4; }
+  .tag.client { background:#1f3340; color:#86d0ff; }
+  .tag.both   { background:#2e3320; color:#cfe08a; }
+  #status { margin-top:10px; font-size:11px; color:#7a828f; white-space:pre-wrap; }
+  dl { margin:0; display:grid; grid-template-columns:auto 1fr; gap:2px 8px; font-size:12px; }
+  dt { color:#7a828f; } dd { margin:0; word-break:break-word; }
+  .field { display:flex; align-items:center; gap:6px; margin:3px 0; }
+  .field label { color:#8a93a3; width:64px; font-size:11px; }
+  .field input { width:100%; padding:3px 6px; }
+  .seg { display:flex; gap:0; margin-top:6px; border:1px solid #353a44; border-radius:5px; overflow:hidden; }
+  .seg button { flex:1; border:0; border-radius:0; background:#1b1e24; }
+  .seg button.on { background:#1d3a5c; color:#bfe0ff; }
+  .mob { display:flex; gap:5px; align-items:center; margin:2px 0; }
+  .mob input { width:54px; padding:2px 4px; }
+  .mob .nm { flex:1; font-size:11px; color:#aab; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  hr { border:0; border-top:1px solid #2b2f37; margin:10px 0; }
+  .muted { color:#7a828f; font-size:11px; }
+  kbd { background:#222630; border:1px solid #353a44; border-radius:3px; padding:0 4px; font-size:11px; }
+  #browser { bottom:10px; right:10px; width:300px; padding:12px; max-height:calc(100vh - 20px); display:flex; flex-direction:column; }
+  #ob-preview { width:100%; height:150px; border-radius:6px; border:1px solid #2b2f37; background:#15171c; display:block; }
+  #ob-list { margin-top:6px; overflow-y:auto; flex:1; min-height:120px; border:1px solid #2b2f37; border-radius:6px; }
+  .ob-row { display:flex; align-items:center; gap:6px; padding:4px 7px; font-size:12px; cursor:grab; border-bottom:1px solid #20242c; }
+  .ob-row:hover { background:#1b2230; }
+  .ob-row .k { font-size:9px; font-weight:700; padding:1px 4px; border-radius:6px; }
+  .ob-row .k.OBJECT { background:#1f3340; color:#86d0ff; }
+  .ob-row .k.CNST { background:#2e3320; color:#cfe08a; }
+  .ob-row .k.MORPH { background:#33222e; color:#ff9ec4; }
+  .ob-row .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ob-row .zn { color:#6a727f; font-size:10px; }
+  .ob-more { padding:6px 8px; color:#6a727f; font-style:italic; font-size:11px; }
+</style>
+</head>
+<body>
+  <div id="viewport"></div>
+
+  <div id="left" class="panel">
+    <h1>mapforge</h1>
+    <select id="zone-select"><option>loading…</option></select>
+    <div class="row">
+      <button id="load-btn" class="primary">Load zone</button>
+      <button id="fit-btn">Fit</button>
+    </div>
+
+    <h2>Layers</h2>
+    <div id="layers"></div>
+
+    <h2>Mode</h2>
+    <div class="seg" id="mode-seg">
+      <button data-mode="select" class="on">Select</button>
+      <button data-mode="paint">Paint collision</button>
+    </div>
+    <div id="paint-tools" style="display:none">
+      <div class="seg" id="paint-seg">
+        <button data-val="0" class="on">Walk</button>
+        <button data-val="1">Block</button>
+        <button data-val="2">Mob-block</button>
+      </div>
+    </div>
+
+    <hr>
+    <button id="save-btn" class="primary" disabled style="width:100%">Save</button>
+    <button id="export-btn" style="width:100%;margin-top:6px">Export .glb (Unity/Blender)</button>
+    <div id="status"></div>
+  </div>
+
+  <div id="right" class="panel">
+    <h2 id="insp-title">Selection</h2>
+    <div id="insp-body"></div>
+  </div>
+
+  <div id="browser" class="panel">
+    <h2 style="margin-top:0">Object browser</h2>
+    <canvas id="ob-preview"></canvas>
+    <div id="ob-label" class="muted" style="margin:4px 0;min-height:14px">drag a model onto the map</div>
+    <div class="row">
+      <input id="ob-search" type="search" placeholder="filter by name…" style="flex:2">
+      <select id="ob-zone" style="flex:1"></select>
+    </div>
+    <div id="ob-list"></div>
+  </div>
+
+  <div id="hint" class="panel">
+    <b style="color:#7cc4ff">Controls</b> ·
+    Left-drag orbit · Middle-drag pan · Wheel zoom ·
+    <b style="color:#9cf">Hold right-click + WASD to fly</b> (Q/E down/up, Shift boost, wheel speed) ·
+    Click select · <kbd>W</kbd>/<kbd>E</kbd>/<kbd>R</kbd> move/rotate/scale ·
+    <kbd>Del</kbd> delete · <kbd>Ctrl+D</kbd> duplicate · <kbd>Esc</kbd> deselect
+  </div>
+
+  <script type="importmap">
+  { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }}
+  </script>
+  <script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

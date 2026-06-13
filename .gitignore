@@ -1,0 +1,20 @@
+# local config with real machine paths
+config.py
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# exports / build artifacts (can be large)
+exports/
+*.glb
+*.fbx
+*.zip
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
