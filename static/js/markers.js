@@ -12,7 +12,7 @@ const STYLE = {
   EVENT:     { color: 0x39d0ff, shape: 'box',   size: 500 },
   AREA:      { color: 0x39ffd0, shape: 'wbox',  size: 500 },
   SOUND:     { color: 0xffe14d, shape: 'sphere', size: 450 },
-  EFFECT:    { color: 0x8cff5a, shape: 'sphere', size: 450 },
+  // EFFECT now renders as real particle systems (see effects.js).
   COLLISION: { color: 0xd83a3a, shape: 'wbox',  size: 500 },
 };
 

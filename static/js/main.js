@@ -7,6 +7,7 @@ import { buildTerrain, clearTerrain, terrainGroup } from './terrain.js';
 import { buildWater, clearWater, waterGroup } from './water.js';
 import { buildObjects, clearObjects, objectsGroup, npcGroup, spawnGroup, setTexturesHidden, setRiggedNpcs } from './objects.js';
 import { buildRiggedNpcs } from './rignpc.js';
+import { buildEffects, effectsGroup } from './effects.js';
 import { buildMarkers, clearMarkers, markerGroups, markerCount } from './markers.js';
 import { buildCollision, clearCollision, setCollisionVisible, isCollisionVisible, paintAt, collisionMeshes } from './collision.js';
 import * as Editor from './editor.js';
@@ -76,6 +77,7 @@ async function loadZone(keyName, keepCamera = false) {
   setRiggedNpcs(useRig);                    // skip static MOB/REGEN if we'll rig them
   const obox = await buildObjects(zone, packs);
   if (useRig) { setStatus(`${keyName}: rigging NPCs…`); await buildRiggedNpcs(zone, packs, rig); }
+  await buildEffects(zone, packs);
   buildMarkers(zone);
   buildCollision(mov);
 
@@ -116,9 +118,9 @@ const LAYER_DEFS = [
   { id: 'AREA', label: 'Areas', color: 0x39ffd0, consumer: 'server', marker: 'AREA' },
   { id: 'COLLISION', label: 'Collision boxes', color: 0xd83a3a, consumer: 'both', marker: 'COLLISION' },
   { id: 'SOUND', label: 'Sounds', color: 0xffe14d, consumer: 'client', marker: 'SOUND' },
-  { id: 'EFFECT', label: 'Effects', color: 0x8cff5a, consumer: 'client', marker: 'EFFECT' },
+  { id: 'EFFECT', label: 'Effects (particles)', color: 0x8cff5a, consumer: 'client', count: 'EFFECT', get: () => effectsGroup },
 ];
-const DEFAULT_OFF = new Set(['SOUND', 'EFFECT', 'mov']);
+const DEFAULT_OFF = new Set(['SOUND', 'mov']);
 
 function buildLayers(zone) {
   const host = $('layers'); host.innerHTML = '';

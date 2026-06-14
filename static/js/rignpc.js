@@ -122,7 +122,6 @@ function ifoMatrix(o) {
     new THREE.Quaternion(o.rot[0], o.rot[1], o.rot[2], o.rot[3]),
     new THREE.Vector3(o.scale[0], o.scale[1], o.scale[2]));
 }
-const S100 = new THREE.Matrix4().makeScale(100, 100, 100);
 
 export async function buildRiggedNpcs(zone, packs, rig) {
   clearRigged();
@@ -136,7 +135,7 @@ export async function buildRiggedNpcs(zone, packs, rig) {
     for (const rec of (lumps.MOB || [])) {
       const r = rig[rec.object_id], parts = models[rec.object_id] && models[rec.object_id].parts;
       if (!r || !parts) continue;
-      const m = ifoMatrix(rec).multiply(S100);
+      const m = ifoMatrix(rec);             // mesh is already x100, bones at file scale
       jobs.push(buildOne(r, parts, m, { tile: [t.x, t.y], lump: 'MOB', idx: rec.idx })
         .then(g => npcGroup.add(g)));
     }
@@ -156,7 +155,7 @@ export async function buildRiggedNpcs(zone, packs, rig) {
         const ox = n > 1 ? Math.cos(ang) * R : 0, oy = n > 1 ? Math.sin(ang) * R : 0;
         const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), ang + Math.PI);
         const m = new THREE.Matrix4().compose(
-          new THREE.Vector3(rec.pos[0] + ox, rec.pos[1] + oy, rec.pos[2]), q, new THREE.Vector3(1, 1, 1)).multiply(S100);
+          new THREE.Vector3(rec.pos[0] + ox, rec.pos[1] + oy, rec.pos[2]), q, new THREE.Vector3(1, 1, 1));
         jobs.push(buildOne(rig[id], parts, m, { tile: [t.x, t.y], lump: 'REGEN', idx: rec.idx })
           .then(g => spawnGroup.add(g)));
       }

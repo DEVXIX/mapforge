@@ -28,6 +28,7 @@ import rose_ifo as RI               # noqa: E402
 import rose_chr                     # noqa: E402
 import rose_zmd                     # noqa: E402
 import rose_zmo                     # noqa: E402
+import rose_effect                  # noqa: E402
 from rose_zsc import read_zsc       # noqa: E402
 from rose_zms import read_zms       # noqa: E402
 from parse_stb import StbFile       # noqa: E402
@@ -466,6 +467,26 @@ def api_anim():
     return Response(bytes(out), mimetype="application/octet-stream")
 
 
+_EFFECT_CACHE: dict = {}
+
+
+@app.route("/api/effect")
+def api_effect():
+    """Particle emitters (texture + life/size) for an .EFT placement."""
+    rel = request.args.get("path", "")
+    if rel in _EFFECT_CACHE:
+        return jsonify(_EFFECT_CACHE[rel])
+    p = _resolve(rel)
+    if not p or not os.path.exists(p):
+        abort(404)
+    try:
+        data = rose_effect.parse_effect(p, _resolve)
+    except Exception as e:
+        data = {"emitters": [], "error": str(e)}
+    _EFFECT_CACHE[rel] = data
+    return jsonify(data)
+
+
 @app.route("/api/mesh")
 def api_mesh():
     rel = request.args.get("path", "")
@@ -480,7 +501,10 @@ def api_mesh():
     nv, nf = len(zms.positions), len(zms.faces)
     has_skin = want_skin and bool(zms.weights) and bool(zms.bones) and bool(zms.bone_indices)
     flags = (1 if zms.uvs else 0) | (2 if has_skin else 0)
-    pos_scale = 1.0 if want_skin else (100.0 if zms.version >= 7 else 1.0)   # ZZ_SCALE_IN=0.01
+    # External scale (x100 for v7) for skinned meshes too: the skeleton bones come
+    # in at file scale (= mesh*100), so the mesh must be x100 to match — otherwise
+    # the skeleton is ~100x bigger than the mesh and the skin explodes.
+    pos_scale = 100.0 if zms.version >= 7 else 1.0   # ZZ_SCALE_IN=0.01
     out = bytearray()
     out += struct.pack("<IIII", 0x4D534D5A, nv, nf, flags)
     for x, y, z in zms.positions:

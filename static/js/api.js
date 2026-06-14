@@ -51,6 +51,13 @@ export async function getRig(key) {
   return (await fetch(`/api/zone/${encodeURIComponent(key)}/rig`)).json();
 }
 
+// Particle emitters for an .EFT effect file.
+export async function getEffect(eftPath) {
+  const r = await fetch(`/api/effect?path=${encodeURIComponent(eftPath)}`);
+  if (!r.ok) return null;
+  return r.json();
+}
+
 // Skinned mesh (raw mesh units) -> {positions, normals, uvs, indices, skinIndex, skinWeight}
 const _skinCache = new Map();
 export async function getSkinnedMesh(path) {
