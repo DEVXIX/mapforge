@@ -46,6 +46,41 @@ export function texUrl(path, alpha) {
   return `/api/texture?path=${encodeURIComponent(path)}${alpha ? '&alpha=1' : ''}`;
 }
 
+// Skeleton + idle animation for every NPC/monster id in the zone.
+export async function getRig(key) {
+  return (await fetch(`/api/zone/${encodeURIComponent(key)}/rig`)).json();
+}
+
+// Skinned mesh (raw mesh units) -> {positions, normals, uvs, indices, skinIndex, skinWeight}
+const _skinCache = new Map();
+export async function getSkinnedMesh(path) {
+  if (_skinCache.has(path)) return _skinCache.get(path);
+  const p = (async () => {
+    const buf = await (await fetch(`/api/mesh?path=${encodeURIComponent(path)}&skin=1`)).arrayBuffer();
+    const dv = new DataView(buf);
+    if (dv.getUint32(0, true) !== 0x4D534D5A) throw new Error('bad mesh magic');
+    const nv = dv.getUint32(4, true), nf = dv.getUint32(8, true), flags = dv.getUint32(12, true);
+    let o = 16;
+    const positions = new Float32Array(buf, o, nv * 3); o += nv * 12;
+    const normals   = new Float32Array(buf, o, nv * 3); o += nv * 12;
+    const uvs       = new Float32Array(buf, o, nv * 2); o += nv * 8;
+    const indices   = new Uint16Array(buf, o, nf * 3);  o += nf * 6;
+    let skinIndex = null, skinWeight = null;
+    if (flags & 2) {
+      // interleaved per vertex: u16x4 indices then f32x4 weights
+      skinIndex = new Uint16Array(nv * 4);
+      skinWeight = new Float32Array(nv * 4);
+      for (let i = 0; i < nv; i++) {
+        for (let k = 0; k < 4; k++) { skinIndex[i * 4 + k] = dv.getUint16(o, true); o += 2; }
+        for (let k = 0; k < 4; k++) { skinWeight[i * 4 + k] = dv.getFloat32(o, true); o += 4; }
+      }
+    }
+    return { positions, normals, uvs, indices, skinIndex, skinWeight, hasUV: !!(flags & 1) };
+  })();
+  _skinCache.set(path, p);
+  return p;
+}
+
 // MORPH vertex animation: per-frame positions matching the mesh vertex order.
 export async function getAnim(zmoPath, meshPath) {
   const r = await fetch(`/api/anim?zmo=${encodeURIComponent(zmoPath)}&mesh=${encodeURIComponent(meshPath)}`);

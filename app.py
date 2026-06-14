@@ -26,6 +26,8 @@ import config                       # noqa: E402
 import zone as Z                    # noqa: E402
 import rose_ifo as RI               # noqa: E402
 import rose_chr                     # noqa: E402
+import rose_zmd                     # noqa: E402
+import rose_zmo                     # noqa: E402
 from rose_zsc import read_zsc       # noqa: E402
 from rose_zms import read_zms       # noqa: E402
 from parse_stb import StbFile       # noqa: E402
@@ -260,6 +262,86 @@ def api_zone_packs(key: str):
 
 
 # --------------------------------------------------------------------------
+# Rigs (skeleton + idle animation) for NPC/monster ids, so the viewer can
+# skin + play the standing animation. Quaternions come out (x,y,z,w) ready for
+# three.js; bones/anim are in raw mesh units (the rig is scaled x100 at place).
+# --------------------------------------------------------------------------
+_RIG_CACHE: dict = {}
+
+
+def _idle_motion(chrf, ch):
+    a = next((a for a in ch.animations if a[0] == 0), ch.animations[0] if ch.animations else None)
+    return chrf.motions[a[1]] if a and 0 <= a[1] < len(chrf.motions) else None
+
+
+def _zone_npc_ids(z):
+    ids = set()
+    for x, y, stem in Z._tiles_in(z["dir"]):
+        try:
+            ifo = RI.read_ifo(stem + ".IFO")
+        except Exception:
+            continue
+        for ob in (ifo.lumps.get(RI.LUMP_MOB).objects if ifo.lumps.get(RI.LUMP_MOB) else []):
+            ids.add(ob.object_id)
+        rl = ifo.lumps.get(RI.LUMP_REGEN)
+        if rl:
+            for ob in rl.objects:
+                for m in ob.extra.get("basic", []) + ob.extra.get("tactics", []):
+                    ids.add(m.mob_id)
+    return ids
+
+
+@app.route("/api/zone/<key>/rig")
+def api_zone_rig(key: str):
+    z = Z.find_zone(key)
+    if not z:
+        abort(404)
+    if key in _RIG_CACHE:
+        return jsonify(_RIG_CACHE[key])
+    chrf = _get_chr()
+    out = {}
+    if chrf:
+        for nid in _zone_npc_ids(z):
+            if not (0 <= nid < len(chrf.characters)):
+                continue
+            ch = chrf.characters[nid]
+            if not ch or not (0 <= ch.skeleton < len(chrf.skeletons)):
+                continue
+            skp = _resolve(chrf.skeletons[ch.skeleton])
+            if not skp:
+                continue
+            try:
+                zmd = rose_zmd.read_zmd(skp)
+            except Exception:
+                continue
+            bones = [{"parent": b.parent, "pos": list(b.position),
+                      "rot": [b.rotation[1], b.rotation[2], b.rotation[3], b.rotation[0]]}
+                     for b in zmd.bones]
+            nb = len(zmd.bones)
+            anim = None
+            motrel = _idle_motion(chrf, ch)
+            mp = _resolve(motrel) if motrel else None
+            if mp:
+                try:
+                    zmo = rose_zmo.read_zmo(mp)
+                    rot = [None] * nb
+                    pos = [None] * nb
+                    for c in zmo.channels:
+                        if not (0 <= c.refer_id < nb):
+                            continue
+                        if c.ctype == rose_zmo.CT_ROTATION:
+                            rot[c.refer_id] = [[f[1], f[2], f[3], f[0]] for f in c.frames]
+                        elif c.ctype == rose_zmo.CT_POSITION:
+                            pos[c.refer_id] = [list(f) for f in c.frames]
+                    anim = {"fps": zmo.fps, "frames": zmo.num_frames, "rot": rot, "pos": pos}
+                except Exception:
+                    anim = None
+            out[str(nid)] = {"bones": bones, "anim": anim}
+    _RIG_CACHE[key] = out
+    return jsonify(out)
+
+
+# --------------------------------------------------------------------------
 # Mesh + texture
 # --------------------------------------------------------------------------
 @app.route("/api/zone/<key>/export")
@@ -387,13 +469,18 @@ def api_anim():
 @app.route("/api/mesh")
 def api_mesh():
     rel = request.args.get("path", "")
+    # skin=1 -> append per-vertex skin (skinIndex u16x4 mapped to skeleton bone +
+    # skinWeight f32x4) AND serve RAW positions (the rigged object is scaled x100
+    # at placement, so its mesh + bones must share the same unscaled space).
+    want_skin = request.args.get("skin") == "1"
     p = _resolve(rel)
     if not p or not os.path.exists(p):
         abort(404)
     zms = read_zms(p)
     nv, nf = len(zms.positions), len(zms.faces)
-    flags = 1 if zms.uvs else 0
-    pos_scale = 100.0 if zms.version >= 7 else 1.0   # ZZ_SCALE_IN=0.01
+    has_skin = want_skin and bool(zms.weights) and bool(zms.bones) and bool(zms.bone_indices)
+    flags = (1 if zms.uvs else 0) | (2 if has_skin else 0)
+    pos_scale = 1.0 if want_skin else (100.0 if zms.version >= 7 else 1.0)   # ZZ_SCALE_IN=0.01
     out = bytearray()
     out += struct.pack("<IIII", 0x4D534D5A, nv, nf, flags)
     for x, y, z in zms.positions:
@@ -410,6 +497,15 @@ def api_mesh():
         out += b"\x00" * (nv * 8)
     for a, b, c in zms.faces:
         out += struct.pack("<HHH", a, b, c)
+    if has_skin:
+        pal = zms.bone_indices
+        for i in range(nv):
+            bi, w = zms.bones[i], zms.weights[i]
+            for k in range(4):
+                j = bi[k] if k < len(bi) else 0
+                out += struct.pack("<H", pal[j] if 0 <= j < len(pal) else 0)
+            for k in range(4):
+                out += struct.pack("<f", w[k] if k < len(w) else 0.0)
     return Response(bytes(out), mimetype="application/octet-stream")
 
 

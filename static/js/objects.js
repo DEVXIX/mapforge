@@ -51,6 +51,10 @@ spawnGroup.name = 'spawns';
 scene.add(spawnGroup);
 
 const ZSC_LUMPS = ['OBJECT', 'CNST'];
+// When rigged NPCs/monsters are active (rignpc.js), skip the static instanced
+// MOB/REGEN render here so they aren't drawn twice.
+let riggedNpcs = false;
+export function setRiggedNpcs(v) { riggedNpcs = v; }
 const texLoader = new THREE.TextureLoader();
 const TEX = new Map();
 let texturesHidden = false;
@@ -125,7 +129,7 @@ function collectBatches(zone, packs) {
     // walked exactly like a ZSC model. Routed to npcGroup via the isNpc flag.
     const mob = lumps['MOB'];
     const npcPack = packs.NPC;
-    if (mob && npcPack && npcPack.models) {
+    if (!riggedNpcs && mob && npcPack && npcPack.models) {
       for (const rec of mob) {
         const model = npcPack.models[rec.object_id];
         if (!model || !model.parts) continue;
@@ -153,7 +157,7 @@ function collectBatches(zone, packs) {
     // REGEN — monster spawn points. Draw each distinct monster the point spawns
     // (basic + tactics) once, arranged in a ring around the spawn centre.
     const regen = lumps['REGEN'];
-    if (regen && npcPack && npcPack.models) {
+    if (!riggedNpcs && regen && npcPack && npcPack.models) {
       const spawnQ = new THREE.Quaternion(), up = new THREE.Vector3(0, 0, 1);
       for (const rec of regen) {
         const e = rec.extra || {};

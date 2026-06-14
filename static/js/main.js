@@ -5,7 +5,8 @@ import { scene, camera, renderer, controls, frameBox } from './scene.js';
 import * as API from './api.js';
 import { buildTerrain, clearTerrain, terrainGroup } from './terrain.js';
 import { buildWater, clearWater, waterGroup } from './water.js';
-import { buildObjects, clearObjects, objectsGroup, npcGroup, spawnGroup, setTexturesHidden } from './objects.js';
+import { buildObjects, clearObjects, objectsGroup, npcGroup, spawnGroup, setTexturesHidden, setRiggedNpcs } from './objects.js';
+import { buildRiggedNpcs } from './rignpc.js';
 import { buildMarkers, clearMarkers, markerGroups, markerCount } from './markers.js';
 import { buildCollision, clearCollision, setCollisionVisible, isCollisionVisible, paintAt, collisionMeshes } from './collision.js';
 import * as Editor from './editor.js';
@@ -56,8 +57,8 @@ $('export-btn').onclick = () => {
 async function loadZone(keyName, keepCamera = false) {
   setStatus(`loading ${keyName}…`);
   Editor.clearSelection();
-  const [zone, packs, mov] = await Promise.all([
-    API.getZone(keyName), API.getPacks(keyName), API.getMov(keyName),
+  const [zone, packs, mov, rig] = await Promise.all([
+    API.getZone(keyName), API.getPacks(keyName), API.getMov(keyName), API.getRig(keyName),
   ]);
   zoneData = zone;
 
@@ -71,7 +72,10 @@ async function loadZone(keyName, keepCamera = false) {
   const tbox = buildTerrain(zone);
   buildWater(zone);
   setStatus(`${keyName}: building objects…`);
+  const useRig = rig && Object.keys(rig).length > 0;
+  setRiggedNpcs(useRig);                    // skip static MOB/REGEN if we'll rig them
   const obox = await buildObjects(zone, packs);
+  if (useRig) { setStatus(`${keyName}: rigging NPCs…`); await buildRiggedNpcs(zone, packs, rig); }
   buildMarkers(zone);
   buildCollision(mov);
 
