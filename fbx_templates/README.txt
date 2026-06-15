@@ -41,6 +41,14 @@ to a stock shader automatically.
       Revert with  ROSE > Remove Animated Objects.
    If an animated mesh comes in rotated, open Editor/RoseAnimatedObjects.cs and
    tweak EXTRA_EULER (e.g. (90,0,0)), then re-run.
+6. (Optional) NPCs + monsters — idle-animated crowd:
+   With the map set up, menu:  ROSE > Setup NPCs
+   -> instantiates NPCs/Unity/npcs_posed.fbx (every NPC/monster at its real 1:1
+      spot, named NPCPOSE__<id>__<n>), then overlays each character's looping
+      blend-shape idle (NPCs/Unity/Anim/<id>.fbx) and hides the static mesh — same
+      proven pattern as the animated objects. Textures are embedded in the NPC FBX,
+      so no separate material step is needed for them.
+      Adjust idle speed via the RoseAnimationSpeed component on each NPC.
 
 --------------------------------------------------------------------------
 UNREAL ENGINE 5
@@ -51,6 +59,15 @@ UNREAL ENGINE 5
 3. Tools > Execute Python Script... >  UE5/assign_rose_materials_ue.py
    -> imports the textures, builds a Material per slot, and assigns them to the
       imported static meshes by slot name.
+4. (Optional) Whole map + NPCs straight from glb (textured, no FBX material step):
+   Tools > Execute Python Script... >  UE5/import_rose_map_ue.py   (the map)
+   then  UE5/import_npcs_ue.py   -> NPCs/monsters as posed static meshes, placed
+   1:1 with the viewer (built from npcs_posed.glb through the same pipeline as the
+   map, so no per-actor tuning).
+5. (Optional) Animated NPC crowd:  UE5/import_npcs_vat_ue.py
+   -> same 1:1 placement but the NPCs idle-animate via a vertex-animation-texture
+      material (npcs_vat.glb + VAT/). If anything looks off, re-run import_npcs_ue.py
+      for the safe static crowd.
 
 --------------------------------------------------------------------------
 NOTES

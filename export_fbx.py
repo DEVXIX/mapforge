@@ -33,6 +33,7 @@ import export_npcs
 import export_npc_models
 import export_npc_posed
 import export_npc_vat
+import export_npc_unity
 
 BLENDER = os.environ.get("BLENDER_EXE",
                          r"C:/Program Files/Blender Foundation/Blender 5.0/blender.exe")
@@ -110,6 +111,8 @@ def build(key, out_root=None):
                  os.path.join(bundle, "Editor", "RoseAnimatedObjects.cs"))
     shutil.copy2(os.path.join(TEMPLATES, "RoseEffects.cs"),
                  os.path.join(bundle, "Editor", "RoseEffects.cs"))
+    shutil.copy2(os.path.join(TEMPLATES, "RoseNPCs.cs"),
+                 os.path.join(bundle, "Editor", "RoseNPCs.cs"))
     shutil.copy2(os.path.join(TEMPLATES, "RosePlayerSetup.cs"),
                  os.path.join(bundle, "Editor", "RosePlayerSetup.cs"))
     shutil.copy2(os.path.join(TEMPLATES, "ROSE_URP_Lit.shader"),
@@ -188,6 +191,13 @@ def build(key, out_root=None):
         export_npc_vat.build(key, bundle)
     except Exception as e:
         print("  [fbx] VAT NPCs skipped: %s" % e)
+
+    # 5h. Unity NPC crowd: posed-static FBX (1:1) + per-character blend-shape idle
+    try:
+        print("[fbx] building Unity NPC crowd (blend-shape idle)…")
+        export_npc_unity.build(key, bundle)
+    except Exception as e:
+        print("  [fbx] Unity NPCs skipped: %s" % e)
 
     # cleanup the intermediate glb + its sidecar (bundle is FBX-only)
     for p in (glb, glb + ".materials.json"):
