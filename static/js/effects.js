@@ -1,17 +1,20 @@
-// Particle effects — renders the EFFECT lump's .EFT/.PTL emitters as the game's
-// real particle layers: each PTL "sequence" spawns its particle count inside its
-// emit-radius box, drifts them by the velocity + gravity, twinkles alpha over
-// life, and draws them as additive textured point sprites. Distances are already
-// in world units (PTL *ZZ_SCALE_IN, world *100 cancel).
+// Particle effects — renders the zone's data-driven effects: object-attached
+// effects (ROSE ZSC "dummy points" each reference an .EFT, e.g. the fountain's
+// bunsudae jets, streetlight glows, brazier/port-vessel fires) plus standalone
+// EFFECT-lump entries. Each placement carries a world position + rotation (so
+// directional jets aim correctly) and a set of flattened .PTL emitters. The
+// backend (/api/zone/<key>/effects, export_effects.compute) does the parsing;
+// here we just spawn + simulate the particles. Fountains also get a flat
+// translucent basin pool (no .EFT provides the standing water).
 import * as THREE from 'three';
 import { scene, camera, renderer, onFrame } from './scene.js';
-import { getEffect, texUrl } from './api.js';
+import { texUrl, getZoneEffects } from './api.js';
 
 export const effectsGroup = new THREE.Group();
 effectsGroup.name = 'effects';
 scene.add(effectsGroup);
 
-const SIZE_SCALE = 9;          // PTL size (e.g. 20) -> world sprite size
+const SIZE_SCALE = 9;          // PTL size -> world sprite size
 const systems = [];
 const texLoader = new THREE.TextureLoader();
 const TEX = new Map();
@@ -30,10 +33,11 @@ const VERT = `
   }`;
 const FRAG = `
   uniform sampler2D map;
+  uniform vec3 uTint;
   varying float vAlpha;
   void main() {
     vec4 t = texture2D(map, gl_PointCoord);
-    gl_FragColor = vec4(t.rgb, t.a * vAlpha);
+    gl_FragColor = vec4(t.rgb * uTint, t.a * vAlpha);
   }`;
 
 function loadTex(path) {
@@ -46,15 +50,19 @@ function loadTex(path) {
 
 function rand(a, b) { return a + Math.random() * (b - a); }
 
-// Build one particle system for a PTL sequence at a world origin.
-function buildSystem(seq, origin) {
-  const N = Math.min(seq.num_particles || 30, 220);
-  const er = seq.emit_radius || [0, 0, 0, 0, 0, 0];      // min xyz, max xyz
-  const vel = (seq.events.find(e => e.type === 11) || {}).vel || [-10, -10, -10, 10, 10, 10];
-  const grav = seq.gravity || [0, 0, 0, 0, 0, 0];
-  const sz = (seq.events.find(e => e.type === 1) || {}).size;
-  const psize = (sz ? (sz[2] + sz[3]) * 0.5 : 20) * SIZE_SCALE;
-  const life = Math.max(0.6, (seq.life ? seq.life[1] : 50) / 30);
+// Build one particle system for a flattened PTL emitter at a world origin,
+// oriented by `quat` (a THREE.Quaternion) so directional FX aim correctly.
+function buildSystem(em, origin, quat) {
+  const N = Math.min(em.num_particles || 30, 220);
+  const er = em.emit_radius || [0, 0, 0, 0, 0, 0];       // min xyz, max xyz
+  const vel = em.vel || [0, 0, 0, 0, 0, 0];              // min xyz, max xyz
+  const grav = em.gravity || [0, 0, 0, 0, 0, 0];
+  const sz = em.size;                                    // [min x,y, max x,y]
+  const avg = sz ? (sz[2] + sz[3]) * 0.5 : 0;
+  const psize = (avg > 0.5 ? avg : 20) * SIZE_SCALE;     // 0-size effects -> sensible default
+  const life = Math.max(0.5, (em.life ? Math.max(em.life[0], em.life[1]) : 50) / 30);
+  const tint = (em.color && em.color.length >= 3 && (em.color[0] + em.color[1] + em.color[2]) > 0.01)
+    ? [em.color[0], em.color[1], em.color[2]] : [1, 1, 1];
 
   const geo = new THREE.BufferGeometry();
   const pos = new Float32Array(N * 3), alpha = new Float32Array(N), size = new Float32Array(N);
@@ -62,12 +70,14 @@ function buildSystem(seq, origin) {
   geo.setAttribute('alpha', new THREE.BufferAttribute(alpha, 1));
   geo.setAttribute('psize', new THREE.BufferAttribute(size, 1));
   const mat = new THREE.ShaderMaterial({
-    uniforms: { map: { value: loadTex(seq.texture) }, uScale: { value: 1 } },
+    uniforms: { map: { value: loadTex(em.texture) }, uScale: { value: 1 }, uTint: { value: new THREE.Vector3(...tint) } },
     vertexShader: VERT, fragmentShader: FRAG,
-    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    transparent: true, depthWrite: false,
+    blending: em.additive === false ? THREE.NormalBlending : THREE.AdditiveBlending,
   });
   const points = new THREE.Points(geo, mat);
   points.position.set(origin[0], origin[1], origin[2]);
+  if (quat) points.quaternion.copy(quat);
   points.frustumCulled = false;
   effectsGroup.add(points);
 
@@ -94,7 +104,7 @@ onFrame(() => {
       p.v[2] += gz * dt;
       p.p[0] += p.v[0] * dt; p.p[1] += p.v[1] * dt; p.p[2] += p.v[2] * dt;
       const f = p.age / p.life;
-      s.alpha[i] = Math.sin(f * Math.PI);           // twinkle: fade in then out
+      s.alpha[i] = Math.sin(f * Math.PI);           // fade in then out
       s.pos[i * 3] = p.p[0]; s.pos[i * 3 + 1] = p.p[1]; s.pos[i * 3 + 2] = p.p[2];
       s.size[i] = s.psize;
     }
@@ -102,92 +112,12 @@ onFrame(() => {
     s.geo.attributes.alpha.needsUpdate = true;
     s.geo.attributes.psize.needsUpdate = true;
   }
-  for (const m of effectsGroup.children) if (m.material.uniforms) m.material.uniforms.uScale.value = uScale;
+  for (const m of effectsGroup.children) if (m.material && m.material.uniforms) m.material.uniforms.uScale.value = uScale;
 });
 
-// ---- synthetic fountain water (jets + mist) — not in the map data, our own ----
-let _soft = null;
-function softSprite() {
-  if (_soft) return _soft;
-  const c = document.createElement('canvas'); c.width = c.height = 64;
-  const g = c.getContext('2d');
-  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.35, 'rgba(210,235,255,0.55)');
-  grad.addColorStop(1, 'rgba(190,225,255,0)');
-  g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
-  _soft = new THREE.CanvasTexture(c);
-  return _soft;
-}
-
-// Generic gravity-particle system reusing the onFrame updater shape.
-function makeSystem(tex, origin, N, psize, grav, spawn) {
-  const geo = new THREE.BufferGeometry();
-  const pos = new Float32Array(N * 3), alpha = new Float32Array(N), size = new Float32Array(N);
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('alpha', new THREE.BufferAttribute(alpha, 1));
-  geo.setAttribute('psize', new THREE.BufferAttribute(size, 1));
-  const mat = new THREE.ShaderMaterial({
-    uniforms: { map: { value: tex }, uScale: { value: 1 } },
-    vertexShader: VERT, fragmentShader: FRAG,
-    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-  });
-  const points = new THREE.Points(geo, mat);
-  points.position.set(origin[0], origin[1], origin[2]);
-  points.frustumCulled = false;
-  effectsGroup.add(points);
-  const part = [];
-  for (let i = 0; i < N; i++) { const p = {}; spawn(p); p.age = Math.random() * p.life; part.push(p); }
-  systems.push({ geo, pos, alpha, size, part, psize, grav, spawn });
-}
-
-function findFountains(zone, packs) {
-  const out = [];
-  for (const kind of ['OBJECT', 'CNST']) {
-    const pk = packs && packs[kind];
-    if (!pk || !pk.models) continue;
-    for (const t of zone.tiles)
-      for (const rec of (t.ifo.lumps[kind] || [])) {
-        const mdl = pk.models[rec.object_id];
-        if (mdl && mdl.parts.some(p => /fountain\d/i.test(p.mesh || '')))
-          out.push({ pos: rec.pos, scale: (rec.scale && rec.scale[2]) || 1 });
-      }
-  }
-  return out;
-}
-
-// All offsets/speeds are in UNSCALED mesh units (fountain mesh: base z~134, top
-// z~2491, width ~4491) multiplied by the fountain's IFO scale s, so it lands
-// correctly however the fountain is scaled (this one is 0.4).
-function buildFountain(f) {
+// Flat translucent water sitting in a fountain basin (no .EFT provides this).
+function buildFountainPool(f) {
   const pos = f.pos, s = f.scale || 1;
-  const tex = softSprite();
-  const G = [0, 0, -3600 * s, 0, 0, -3600 * s];
-  // 1. top finial jet — central spout near the top, rises a touch then falls back
-  makeSystem(tex, [pos[0], pos[1], pos[2] + 2300 * s], 80, 42, G, (p) => {
-    p.age = 0; p.life = 1.0 + Math.random() * 0.4;
-    const a = Math.random() * Math.PI * 2, r = Math.random() * 150 * s;
-    const out = (150 + Math.random() * 250) * s, up = (1300 + Math.random() * 450) * s;
-    p.p = [Math.cos(a) * r, Math.sin(a) * r, 0];
-    p.v = [Math.cos(a) * out, Math.sin(a) * out, up];
-  });
-  // 2. petal-hole cascade — water leaves the shell holes, arcs out, falls to the basin
-  makeSystem(tex, [pos[0], pos[1], pos[2] + 1700 * s], 170, 44, G, (p) => {
-    p.age = 0; p.life = 1.0 + Math.random() * 0.35;
-    const a = Math.random() * Math.PI * 2, r = (550 + Math.random() * 450) * s;
-    const out = (620 + Math.random() * 430) * s, up = (340 + Math.random() * 330) * s;
-    p.p = [Math.cos(a) * r, Math.sin(a) * r, 0];
-    p.v = [Math.cos(a) * out, Math.sin(a) * out, up];
-  });
-  // 3. water "smoke" — soft low mist around the basin
-  makeSystem(tex, [pos[0], pos[1], pos[2] + 300 * s], 45, 80,
-    [0, 0, -300 * s, 0, 0, -300 * s], (p) => {
-      p.age = 0; p.life = 1.3 + Math.random() * 0.9;
-      const a = Math.random() * Math.PI * 2, r = Math.random() * 1500 * s;
-      p.p = [Math.cos(a) * r, Math.sin(a) * r, Math.random() * 280 * s];
-      p.v = [(Math.random() - 0.5) * 250 * s, (Math.random() - 0.5) * 250 * s, (240 + Math.random() * 240) * s];
-    });
-  // 4. water sitting in the basin — flat translucent pool
   const pool = new THREE.Mesh(
     new THREE.CircleGeometry(1850 * s, 44),
     new THREE.MeshBasicMaterial({ color: 0x5aa0cf, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }));
@@ -196,20 +126,17 @@ function buildFountain(f) {
   effectsGroup.add(pool);
 }
 
-export async function buildEffects(zone, packs) {
+export async function buildEffects(key) {
   clearEffects();
-  const cache = new Map();
-  for (const t of zone.tiles) {
-    for (const rec of (t.ifo.lumps.EFFECT || [])) {
-      const eft = rec.extra && rec.extra.effect_file;
-      if (!eft) continue;
-      let def = cache.get(eft);
-      if (def === undefined) { def = await getEffect(eft); cache.set(eft, def); }
-      if (!def || !def.emitters) continue;
-      for (const seq of def.emitters) if (seq.texture) buildSystem(seq, rec.pos);
-    }
+  const fx = await getZoneEffects(key);
+  if (!fx) return;
+  const q = new THREE.Quaternion();
+  for (const pl of (fx.placements || [])) {
+    if (pl.rot && pl.rot.length >= 4) q.set(pl.rot[0], pl.rot[1], pl.rot[2], pl.rot[3]);
+    else q.identity();
+    for (const em of (pl.emitters || [])) if (em.texture) buildSystem(em, pl.pos, q.clone());
   }
-  for (const f of findFountains(zone, packs)) buildFountain(f);   // our synthetic fountain water
+  for (const f of (fx.fountains || [])) buildFountainPool(f);
 }
 
 export function clearEffects() {

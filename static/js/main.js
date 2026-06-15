@@ -77,7 +77,7 @@ async function loadZone(keyName, keepCamera = false) {
   setRiggedNpcs(useRig);                    // skip static MOB/REGEN if we'll rig them
   const obox = await buildObjects(zone, packs);
   if (useRig) { setStatus(`${keyName}: rigging NPCs…`); await buildRiggedNpcs(zone, packs, rig); }
-  await buildEffects(zone, packs);
+  await buildEffects(keyName);
   buildMarkers(zone);
   buildCollision(mov);
 

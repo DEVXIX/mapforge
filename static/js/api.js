@@ -58,6 +58,14 @@ export async function getEffect(eftPath) {
   return r.json();
 }
 
+// All data-driven effect placements for a zone (object-dummy + standalone),
+// each with world pos+rotation+emitters, plus fountains for the basin pool.
+export async function getZoneEffects(key) {
+  const r = await fetch(`/api/zone/${encodeURIComponent(key)}/effects`);
+  if (!r.ok) return { placements: [], fountains: [] };
+  return r.json();
+}
+
 // Skinned mesh (raw mesh units) -> {positions, normals, uvs, indices, skinIndex, skinWeight}
 const _skinCache = new Map();
 export async function getSkinnedMesh(path) {

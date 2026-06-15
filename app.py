@@ -487,6 +487,28 @@ def api_effect():
     return jsonify(data)
 
 
+_ZONE_FX_CACHE: dict = {}
+
+
+@app.route("/api/zone/<key>/effects")
+def api_zone_effects(key: str):
+    """All data-driven effect placements for a zone: object-attached effects
+    (ZSC dummy points -> .EFT, e.g. the fountain's bunsudae jets, streetlight
+    glows, brazier fires) with world pos+rotation, plus fountains for the basin
+    pool. Emitter `texture` is a raw asset path (load via /api/texture)."""
+    if key in _ZONE_FX_CACHE:
+        return jsonify(_ZONE_FX_CACHE[key])
+    try:
+        import export_effects
+        data = export_effects.compute(key)
+    except KeyError:
+        abort(404)
+    except Exception as e:
+        data = {"zone": key, "placements": [], "fountains": [], "error": str(e)}
+    _ZONE_FX_CACHE[key] = data
+    return jsonify(data)
+
+
 @app.route("/api/mesh")
 def api_mesh():
     rel = request.args.get("path", "")

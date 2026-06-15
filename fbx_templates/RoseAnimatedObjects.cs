@@ -50,6 +50,7 @@ public static class RoseAnimatedObjects
         if (mapFound || SceneHasMap()) AnimateCore(ref spawned, ref missing);  // 3. animations
         int colliders = AddColliders();                   // 4. walkable mesh colliders
         TryMenu("ROSE/Apply Sky");                        // 5. sky
+        int fx = BuildEffectsSafe();                      // 6. particle effects
 
         EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
         string msg = "Setup complete.\n" +
@@ -58,9 +59,65 @@ public static class RoseAnimatedObjects
                       : "• Map FBX not found — import the whole bundle folder, then re-run.\n") +
             $"• {spawned} animated object(s) placed" + (missing > 0 ? $" ({missing} unmatched — see Console)" : "") + "\n" +
             $"• {colliders} mesh colliders added (terrain/objects walkable; visual 'Collision' boxes hidden)\n" +
-            "• Sky applied\n\nPress Play to see the banners/water animate.\n" +
+            "• Sky applied\n" +
+            $"• {fx} particle effect system(s) built (fountain jets, lights, fires)\n" +
+            "\nPress Play to see the banners/water animate.\n" +
             "Adjust speed via the RoseAnimationSpeed component.";
         EditorUtility.DisplayDialog("ROSE — Setup Scene", msg, "OK");
+    }
+
+    // RoseEffects lives in another file; guard so Setup Scene still works if it's
+    // absent or throws.
+    static int BuildEffectsSafe()
+    {
+        try { return RoseEffects.BuildEffectsCore(); }
+        catch (System.Exception e) { Debug.LogWarning("[ROSE] effects: " + e.Message); return 0; }
+    }
+
+    // -------------------------------------------------------- headless / batch
+    // Entry point for the automated importer:
+    //   Unity.exe -batchmode -quit -projectPath <p> -executeMethod RoseAnimatedObjects.BatchSetupAndSave
+    // Creates a scene, runs the full ROSE setup with NO dialogs, saves it, and
+    // makes it the default build scene. Calls the public material/sky steps
+    // directly (not via the menu) so it's reliable in batch mode.
+    public static void BatchSetupAndSave()
+    {
+        const string scenePath = "Assets/Scenes/ROSE_Map.unity";
+        AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
+        var scene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
+
+        try { AssignRoseMaterials.Run(); } catch (System.Exception e) { Debug.LogError("[ROSE] materials: " + e); }
+
+        bool mapAdded = EnsureMapInScene(out bool mapFound);
+        if (!mapFound) mapFound = TryInstantiateMapFallback();
+
+        int spawned = 0, missing = 0;
+        if (mapFound || SceneHasMap()) AnimateCore(ref spawned, ref missing);
+        int colliders = AddColliders();
+        try { AssignRoseMaterials.ApplySky(); } catch (System.Exception e) { Debug.LogWarning("[ROSE] sky: " + e); }
+        int fx = BuildEffectsSafe();
+
+        Directory.CreateDirectory(Path.GetDirectoryName(scenePath));
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene, scenePath);
+        try { EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(scenePath, true) }; } catch { }
+        AssetDatabase.SaveAssets();
+        Debug.Log($"[ROSE] BATCH DONE: mapFound={mapFound} added={mapAdded} animated={spawned} colliders={colliders} effects={fx} -> {scenePath}");
+    }
+
+    // If the manifest-based lookup misses, instantiate the largest non-animation
+    // model FBX under Assets (the map) so the batch import still has a map.
+    static bool TryInstantiateMapFallback()
+    {
+        var mapAsset = AssetDatabase.FindAssets("t:Model")
+            .Select(AssetDatabase.GUIDToAssetPath)
+            .Where(p => !p.Contains("/Animations/"))
+            .Select(AssetDatabase.LoadAssetAtPath<GameObject>)
+            .FirstOrDefault(a => a != null);
+        if (mapAsset == null) return false;
+        var inst = (GameObject)PrefabUtility.InstantiatePrefab(mapAsset);
+        Undo.RegisterCreatedObjectUndo(inst, "ROSE Add Map");
+        return true;
     }
 
     // ---------------------------------------------------------- individual steps

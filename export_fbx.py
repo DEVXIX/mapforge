@@ -28,6 +28,11 @@ if _HERE not in sys.path:
 
 import export_map
 import export_anim
+import export_effects
+import export_npcs
+import export_npc_models
+import export_npc_posed
+import export_npc_vat
 
 BLENDER = os.environ.get("BLENDER_EXE",
                          r"C:/Program Files/Blender Foundation/Blender 5.0/blender.exe")
@@ -103,6 +108,10 @@ def build(key, out_root=None):
                  os.path.join(bundle, "Editor", "AssignRoseMaterials.cs"))
     shutil.copy2(os.path.join(TEMPLATES, "RoseAnimatedObjects.cs"),
                  os.path.join(bundle, "Editor", "RoseAnimatedObjects.cs"))
+    shutil.copy2(os.path.join(TEMPLATES, "RoseEffects.cs"),
+                 os.path.join(bundle, "Editor", "RoseEffects.cs"))
+    shutil.copy2(os.path.join(TEMPLATES, "RosePlayerSetup.cs"),
+                 os.path.join(bundle, "Editor", "RosePlayerSetup.cs"))
     shutil.copy2(os.path.join(TEMPLATES, "ROSE_URP_Lit.shader"),
                  os.path.join(bundle, "Shaders", "ROSE_URP_Lit.shader"))
     shutil.copy2(os.path.join(TEMPLATES, "ROSE_Skybox.shader"),
@@ -111,8 +120,18 @@ def build(key, out_root=None):
                  os.path.join(bundle, "Shaders", "ROSE_Water.shader"))
     shutil.copy2(os.path.join(TEMPLATES, "RoseAnimationSpeed.cs"),     # runtime (not in Editor/)
                  os.path.join(bundle, "RoseAnimationSpeed.cs"))
+    shutil.copy2(os.path.join(TEMPLATES, "RoseFlyCamera.cs"),          # runtime fly camera
+                 os.path.join(bundle, "RoseFlyCamera.cs"))
+    shutil.copy2(os.path.join(TEMPLATES, "RoseCubePlayer.cs"),         # runtime cube player
+                 os.path.join(bundle, "RoseCubePlayer.cs"))
     shutil.copy2(os.path.join(TEMPLATES, "assign_rose_materials_ue.py"),
                  os.path.join(bundle, "UE5", "assign_rose_materials_ue.py"))
+    shutil.copy2(os.path.join(TEMPLATES, "import_rose_map_ue.py"),
+                 os.path.join(bundle, "UE5", "import_rose_map_ue.py"))
+    shutil.copy2(os.path.join(TEMPLATES, "import_npcs_ue.py"),
+                 os.path.join(bundle, "UE5", "import_npcs_ue.py"))
+    shutil.copy2(os.path.join(TEMPLATES, "import_npcs_vat_ue.py"),
+                 os.path.join(bundle, "UE5", "import_npcs_vat_ue.py"))
     shutil.copy2(os.path.join(TEMPLATES, "README.txt"), os.path.join(bundle, "README.txt"))
 
     # 5b. animated MORPH objects (waving banners, streaming water) -> Animations/
@@ -129,6 +148,46 @@ def build(key, out_root=None):
             anim_stats = {"fbx": len([f for f in os.listdir(dst_anim) if f.lower().endswith(".fbx")])}
     except Exception as e:
         print("  [fbx] animation bake skipped: %s" % e)
+
+    # 5c. data-driven particle effects (object-attached EFTs + standalone) ->
+    #     Effects/effects.json + Effects/Textures/, built by RoseEffects.cs.
+    fx_stats = None
+    try:
+        print("[fbx] exporting effects…")
+        fx_stats = export_effects.build(key, bundle)
+    except Exception as e:
+        print("  [fbx] effects export skipped: %s" % e)
+
+    # 5d. NPC (MOB) + monster-spawn (REGEN) placements -> NPCs/npcs.json, used by
+    #     the UE5 importer (import_rose_map_ue.py) to drop markers on the map.
+    npc_stats = None
+    try:
+        print("[fbx] exporting NPC/monster placements…")
+        npc_stats = export_npcs.build(key, bundle)
+    except Exception as e:
+        print("  [fbx] NPC export skipped: %s" % e)
+
+    # 5e. animated skeletal NPC/monster meshes -> NPCs/Models/<id>.fbx (Blender).
+    npc_model_stats = None
+    try:
+        print("[fbx] building animated NPC/monster meshes…")
+        npc_model_stats = export_npc_models.build(key, bundle)
+    except Exception as e:
+        print("  [fbx] NPC models skipped: %s" % e)
+
+    # 5f. posed-static NPC glb (1:1 with the map pipeline) -> npcs_posed.glb
+    try:
+        print("[fbx] building posed NPC glb…")
+        export_npc_posed.build(key, os.path.join(bundle, "npcs_posed.glb"))
+    except Exception as e:
+        print("  [fbx] posed NPCs skipped: %s" % e)
+
+    # 5g. VAT animated NPC crowd (static meshes + WPO idle anim) -> npcs_vat.glb + VAT/
+    try:
+        print("[fbx] building VAT NPC crowd…")
+        export_npc_vat.build(key, bundle)
+    except Exception as e:
+        print("  [fbx] VAT NPCs skipped: %s" % e)
 
     # cleanup the intermediate glb + its sidecar (bundle is FBX-only)
     for p in (glb, glb + ".materials.json"):
@@ -152,6 +211,9 @@ def build(key, out_root=None):
         "textures": len(os.listdir(os.path.join(bundle, "Textures"))),
         "materials": len(minfo),
         "animations": anim_stats["fbx"] if anim_stats else 0,
+        "effects": fx_stats if fx_stats else 0,
+        "npcs": npc_stats if npc_stats else 0,
+        "npc_models": npc_model_stats if npc_model_stats else 0,
         "zip_bytes": os.path.getsize(zip_path),
     }
 
